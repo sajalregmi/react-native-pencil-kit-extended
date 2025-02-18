@@ -146,10 +146,29 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 - (BOOL)loadBase64Data:(NSString*)base64 {
-  NSData* data =
-      [[NSData alloc] initWithBase64EncodedString:base64
-                                          options:NSDataBase64DecodingIgnoreUnknownCharacters];
-  return [self loadWithData:data];
+  NSData* data = [[NSData alloc] initWithBase64EncodedString:base64 options:NSDataBase64DecodingIgnoreUnknownCharacters];
+  if (!data) {
+    return NO;
+  }
+  NSError* error = nil;
+  PKDrawing* drawing = [[PKDrawing alloc] initWithData:data error:&error];
+  if (error || !drawing) {
+    return NO;
+  }
+  CGRect drawingBounds = drawing.bounds;
+  if (!CGRectIsEmpty(drawingBounds)) {
+    CGSize targetSize = _view.bounds.size;
+    if (targetSize.width > 0 && targetSize.height > 0) {
+      CGFloat scaleX = targetSize.width / CGRectGetWidth(drawingBounds);
+      CGFloat scaleY = targetSize.height / CGRectGetHeight(drawingBounds);
+      CGFloat scale = MIN(scaleX, scaleY);
+      CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
+      PKDrawing* scaledDrawing = [drawing drawingByApplyingTransform:transform];
+      drawing = scaledDrawing;
+    }
+  }
+  [_view setDrawing:drawing];
+  return YES;
 }
 
 - (BOOL)loadWithData:(NSData*)data {
