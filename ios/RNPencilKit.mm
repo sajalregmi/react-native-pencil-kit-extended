@@ -146,29 +146,46 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 - (BOOL)loadBase64Data:(NSString*)base64 {
-  NSData* data = [[NSData alloc] initWithBase64EncodedString:base64 options:NSDataBase64DecodingIgnoreUnknownCharacters];
-  if (!data) {
-    return NO;
-  }
-  NSError* error = nil;
-  PKDrawing* drawing = [[PKDrawing alloc] initWithData:data error:&error];
-  if (error || !drawing) {
-    return NO;
-  }
-  CGRect drawingBounds = drawing.bounds;
-  if (!CGRectIsEmpty(drawingBounds)) {
-    CGSize targetSize = _view.bounds.size;
-    if (targetSize.width > 0 && targetSize.height > 0) {
-      CGFloat scaleX = targetSize.width / CGRectGetWidth(drawingBounds);
-      CGFloat scaleY = targetSize.height / CGRectGetHeight(drawingBounds);
-      CGFloat scale = MIN(scaleX, scaleY);
-      CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-      PKDrawing* scaledDrawing = [drawing drawingByApplyingTransform:transform];
-      drawing = scaledDrawing;
+    NSData* data = [[NSData alloc] initWithBase64EncodedString:base64 options:NSDataBase64DecodingIgnoreUnknownCharacters];
+    if (!data) {
+        return NO;
     }
-  }
-  [_view setDrawing:drawing];
-  return YES;
+    NSError* error = nil;
+    PKDrawing* drawing = [[PKDrawing alloc] initWithData:data error:&error];
+    if (error || !drawing) {
+        return NO;
+    }
+
+    CGRect drawingBounds = drawing.bounds;
+    if (!CGRectIsEmpty(drawingBounds)) {
+        CGSize targetSize = _view.bounds.size;
+        if (targetSize.width > 0 && targetSize.height > 0) {
+
+            // Check if the drawing is already at the correct scale
+            BOOL alreadyScaled = (CGRectGetWidth(drawingBounds) <= targetSize.width && CGRectGetHeight(drawingBounds) <= targetSize.height);
+
+            if (!alreadyScaled) { // Only scale if the drawing is larger than the canvas
+                CGFloat scaleX = targetSize.width / CGRectGetWidth(drawingBounds);
+                CGFloat scaleY = targetSize.height / CGRectGetHeight(drawingBounds);
+                CGFloat scale = MIN(scaleX, scaleY);
+
+                // Calculate translation to center the drawing
+                CGFloat offsetX = (targetSize.width - (drawingBounds.size.width * scale)) / 2 - (drawingBounds.origin.x * scale);
+                CGFloat offsetY = (targetSize.height - (drawingBounds.size.height * scale)) / 2 - (drawingBounds.origin.y * scale);
+
+                // Apply scaling and centering translation
+                CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
+                transform = CGAffineTransformTranslate(transform, offsetX / scale, offsetY / scale);
+
+                // Apply final transformation
+                PKDrawing* transformedDrawing = [drawing drawingByApplyingTransform:transform];
+                drawing = transformedDrawing;
+            }
+        }
+    }
+
+    [_view setDrawing:drawing];
+    return YES;
 }
 
 - (BOOL)loadWithData:(NSData*)data {
