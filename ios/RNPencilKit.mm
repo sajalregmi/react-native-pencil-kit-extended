@@ -51,61 +51,9 @@ getEmitter(const SharedViewEventEmitter emitter) {
     UIScrollView *_panZoomScrollView;  // Controls pinch-to-zoom & pan
      UIView *_zoomableContentView;      // Holds both background + strokes
 
-
-
-
-  // Keep a copy of our props (new architecture style).
-  // If your RNPencilKitProps doesn’t actually define imageURL,
-  // we simply won't use that in updateProps.
   Props::Shared _props;
 }
 
-//- (instancetype)initWithFrame:(CGRect)frame {
-//  if (self = [super initWithFrame:frame]) {
-//    static const auto defaultProps = std::make_shared<const RNPencilKitProps>();
-//    _props = defaultProps;
-//
-//    // Create a container that holds the background image and the PKCanvasView
-//    _containerView = [[UIView alloc] initWithFrame:frame];
-//    _containerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-//    _containerView.clipsToBounds = YES;
-//
-//    // Create background image view and fill it with a white image by default
-//    _backgroundImageView = [[UIImageView alloc] initWithFrame:_containerView.bounds];
-//    _backgroundImageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-//    _backgroundImageView.contentMode = UIViewContentModeScaleAspectFit;
-//
-//    // Generate a plain white image as the default background
-//    UIImage *defaultWhiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
-//                                                        size:_backgroundImageView.bounds.size];
-//    _backgroundImageView.image = defaultWhiteImage;
-//    [_containerView addSubview:_backgroundImageView];
-//
-//    // Create the PKCanvasView on top
-//    _view = [[PKCanvasView alloc] initWithFrame:frame];
-//    _view.delegate = self;
-//
-//    // Enable pinch zoom and panning (PKCanvasView is a subclass of UIScrollView)
-//    _view.minimumZoomScale = 1.0;
-//    _view.maximumZoomScale = 5.0;
-//    _view.zoomScale = 1.0;
-//    _view.delegate = self; // for scroll/zoom handling
-//
-//    // Tool picker setup
-//    _toolPicker = [[PKToolPicker alloc] init];
-//    [_toolPicker addObserver:_view];
-//    [_toolPicker addObserver:self];
-//    [_toolPicker setVisible:YES forFirstResponder:_view];
-//
-//    // Add the canvas on top of the background image
-//    _view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-//    [_containerView addSubview:_view];
-//
-//    // Our containerView is the main contentView for React
-//    self.contentView = _containerView;
-//  }
-//  return self;
-//}
 
 #pragma mark - UIScrollViewDelegate
 
@@ -346,12 +294,6 @@ getEmitter(const SharedViewEventEmitter emitter) {
     [_view setBackgroundColor:intToColor(next->backgroundColor)];
   }
 
-  // -----------------------------------------------------------------------
-  // NOTE: We removed the direct 'imageURL' usage from here because RNPencilKitProps
-  // does not define it. We'll rely on the RCT_CUSTOM_VIEW_PROPERTY below.
-  // -----------------------------------------------------------------------
-
-  // Finally, store the new props and call super
   _props = next; // properly cast above
   [super updateProps:props oldProps:oldProps];
 }
@@ -678,40 +620,3 @@ Class<RCTComponentViewProtocol> RNPencilKitCls(void) {
 }
 
 @end
-
-//#pragma mark - ImageURL Custom Prop
-//@implementation RNPencilKit (BackgroundImageProp)
-//
-//RCT_CUSTOM_VIEW_PROPERTY(imageURL, NSString, RNPencilKit)
-//{
-//    RCTLogInfo(@"[RNPencilKit] Received imageURL:");
-//
-//  RNPencilKit *pencilKitView = (RNPencilKit *)view;
-//  RCTLogInfo(@"[RNPencilKit] Received imageURL: %@", json);
-//
-//
-//  if ([json isKindOfClass:[NSString class]] && [(NSString *)json length] > 0) {
-//    NSString *urlString = (NSString *)json;
-//    NSURL *url = [NSURL URLWithString:urlString];
-//
-//    if (url) {
-//      NSError *error = nil;
-//      NSData *imgData = [NSData dataWithContentsOfURL:url options:0 error:&error];
-//
-//      if (!error && imgData) {
-//        UIImage *loadedImage = [UIImage imageWithData:imgData];
-//        if (loadedImage) {
-//            RCTLogInfo(@"[RNPencilKit] Received imageURL");
-//
-//          pencilKitView->_backgroundImageView.image = loadedImage;
-//          return;
-//        }
-//      }
-//    }
-//  }
-//  UIImage *whiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
-//                                               size:pencilKitView->_backgroundImageView.bounds.size];
-//  pencilKitView->_backgroundImageView.image = whiteImage;
-//}
-//
-//@end
