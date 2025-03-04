@@ -17,7 +17,8 @@ export interface NativeProps extends ViewProps {
   backgroundColor: Int32;
   drawingPolicy?: WithDefault<'default' | 'anyinput' | 'pencilonly', 'default'>;
   isOpaque?: boolean;
-
+  imageURL?: string;
+  // existing event callbacks...
   onToolPickerVisibilityDidChange?: DirectEventHandler<{}>;
   onToolPickerIsRulerActiveDidChange?: DirectEventHandler<{}>;
   onToolPickerFramesObscuredDidChange?: DirectEventHandler<{}>;
@@ -45,4 +46,6 @@ export interface PencilKitCommands {
 export const Commands: PencilKitCommands = codegenNativeCommands<PencilKitCommands>({
   supportedCommands: ['clear', 'showToolPicker', 'hideToolPicker', 'redo', 'undo', 'setTool'],
 });
+
+// The "RNPencilKit" string must match your native component name
 export default codegenNativeComponent<NativeProps>('RNPencilKit');
