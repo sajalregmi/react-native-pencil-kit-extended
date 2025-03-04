@@ -137,7 +137,8 @@ getEmitter(const SharedViewEventEmitter emitter) {
     _panZoomScrollView.maximumZoomScale = 5.0;
     _panZoomScrollView.autoresizingMask =
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-
+      
+    _panZoomScrollView.panGestureRecognizer.minimumNumberOfTouches = 2;
     // Add the scroll view to the container
     [_containerView addSubview:_panZoomScrollView];
 
@@ -237,7 +238,17 @@ getEmitter(const SharedViewEventEmitter emitter) {
         if (!next->imageURL.empty()) {
             std::string urlString = next->imageURL;
             NSString *nsUrlString = [NSString stringWithUTF8String:urlString.c_str()];
-            NSURL *url = [NSURL URLWithString:nsUrlString];
+            NSURL *url;
+
+            // Handle both "file://" and remote URLs
+            if ([nsUrlString hasPrefix:@"file://"]) {
+                RCTLogInfo(@"[RNPencilKit] Detected local file path.");
+                nsUrlString = [nsUrlString stringByReplacingOccurrencesOfString:@"file://" withString:@""];
+                url = [NSURL fileURLWithPath:nsUrlString];
+            } else {
+                RCTLogInfo(@"[RNPencilKit] Detected remote URL.");
+                url = [NSURL URLWithString:nsUrlString];
+            }
 
             RCTLogInfo(@"[RNPencilKit] Constructed NSURL: %@", url);
 
@@ -248,7 +259,14 @@ getEmitter(const SharedViewEventEmitter emitter) {
                     NSData *imgData = [NSData dataWithContentsOfURL:url options:0 error:&error];
 
                     if (error || !imgData) {
-                        RCTLogInfo(@"[RNPencilKit] Failed to load image data: %@", error);
+                        RCTLogInfo(@"[RNPencilKit] Failed to load image data: %@. Path: %@", error, nsUrlString);
+
+                        // Log if the file exists (for local file system debugging)
+                        if ([url isFileURL]) {
+                            BOOL fileExists = [[NSFileManager defaultManager] fileExistsAtPath:nsUrlString];
+                            RCTLogInfo(@"[RNPencilKit] File exists at path (%@): %@", nsUrlString, fileExists ? @"YES" : @"NO");
+                        }
+
                         return;
                     }
 
@@ -258,7 +276,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
                         return;
                     }
 
-                    // Ensure UI updates happen on main thread
+                    // Ensure UI updates happen on the main thread
                     dispatch_async(dispatch_get_main_queue(), ^{
                         RCTLogInfo(@"[RNPencilKit] Successfully loaded UIImage. Setting background now.");
 
@@ -293,6 +311,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
             });
         }
     }
+
 
 
 
