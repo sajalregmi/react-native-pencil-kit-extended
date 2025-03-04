@@ -1,11 +1,14 @@
 #import "RNPencilKit.h"
-
+#import <UIKit/UIKit.h>  // ✅ Ensures UIImage, NSURL, NSData are available
 #import <react/renderer/components/RNPencilKitSpec/ComponentDescriptors.h>
 #import <react/renderer/components/RNPencilKitSpec/EventEmitters.h>
 #import <react/renderer/components/RNPencilKitSpec/Props.h>
 #import <react/renderer/components/RNPencilKitSpec/RCTComponentViewHelpers.h>
 
 #import "RCTFabricComponentsPlugins.h"
+#import <React/RCTViewManager.h>
+#import <React/RCTConvert.h>
+#import <React/RCTLog.h>
 
 using namespace facebook::react;
 
@@ -15,6 +18,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 @interface RNPencilKit () <RCTRNPencilKitViewProtocol, PKCanvasViewDelegate, PKToolPickerObserver, UIScrollViewDelegate>
+// We adopt UIScrollViewDelegate to handle zoom/pan.
 @end
 
 #pragma mark - Image Helper
@@ -36,107 +40,304 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
 @end
 
+
 @implementation RNPencilKit {
   UIView *_containerView;            // Container to hold background + PKCanvasView
   UIImageView *_backgroundImageView; // For showing either white or custom image
   PKCanvasView *_Nonnull _view;
   PKToolPicker *_Nullable _toolPicker;
+
+
+    UIScrollView *_panZoomScrollView;  // Controls pinch-to-zoom & pan
+     UIView *_zoomableContentView;      // Holds both background + strokes
+
+
+
+
+  // Keep a copy of our props (new architecture style).
+  // If your RNPencilKitProps doesn’t actually define imageURL,
+  // we simply won't use that in updateProps.
+  Props::Shared _props;
+}
+
+//- (instancetype)initWithFrame:(CGRect)frame {
+//  if (self = [super initWithFrame:frame]) {
+//    static const auto defaultProps = std::make_shared<const RNPencilKitProps>();
+//    _props = defaultProps;
+//
+//    // Create a container that holds the background image and the PKCanvasView
+//    _containerView = [[UIView alloc] initWithFrame:frame];
+//    _containerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+//    _containerView.clipsToBounds = YES;
+//
+//    // Create background image view and fill it with a white image by default
+//    _backgroundImageView = [[UIImageView alloc] initWithFrame:_containerView.bounds];
+//    _backgroundImageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+//    _backgroundImageView.contentMode = UIViewContentModeScaleAspectFit;
+//
+//    // Generate a plain white image as the default background
+//    UIImage *defaultWhiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
+//                                                        size:_backgroundImageView.bounds.size];
+//    _backgroundImageView.image = defaultWhiteImage;
+//    [_containerView addSubview:_backgroundImageView];
+//
+//    // Create the PKCanvasView on top
+//    _view = [[PKCanvasView alloc] initWithFrame:frame];
+//    _view.delegate = self;
+//
+//    // Enable pinch zoom and panning (PKCanvasView is a subclass of UIScrollView)
+//    _view.minimumZoomScale = 1.0;
+//    _view.maximumZoomScale = 5.0;
+//    _view.zoomScale = 1.0;
+//    _view.delegate = self; // for scroll/zoom handling
+//
+//    // Tool picker setup
+//    _toolPicker = [[PKToolPicker alloc] init];
+//    [_toolPicker addObserver:_view];
+//    [_toolPicker addObserver:self];
+//    [_toolPicker setVisible:YES forFirstResponder:_view];
+//
+//    // Add the canvas on top of the background image
+//    _view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+//    [_containerView addSubview:_view];
+//
+//    // Our containerView is the main contentView for React
+//    self.contentView = _containerView;
+//  }
+//  return self;
+//}
+
+#pragma mark - UIScrollViewDelegate
+
+- (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
+  // We want the entire background + canvas to scale/pan together
+  return _zoomableContentView;
 }
 
 
-
 - (instancetype)initWithFrame:(CGRect)frame {
-  if (self = [super initWithFrame:frame]) {
+  if ((self = [super initWithFrame:frame])) {
     static const auto defaultProps = std::make_shared<const RNPencilKitProps>();
     _props = defaultProps;
 
-    // Create a container that holds the background image and the PKCanvasView
+    //
+    //  A) The top-level container for React
+    //
     _containerView = [[UIView alloc] initWithFrame:frame];
-    _containerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _containerView.autoresizingMask =
+      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _containerView.clipsToBounds = YES;
 
-    // Create background image view and fill it with a white image by default
-    _backgroundImageView = [[UIImageView alloc] initWithFrame:_containerView.bounds];
-    _backgroundImageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    //
+    //  B) Create a UIScrollView to handle pinch-zoom & panning
+    //
+    _panZoomScrollView = [[UIScrollView alloc] initWithFrame:_containerView.bounds];
+    _panZoomScrollView.delegate = self; // For viewForZoomingInScrollView:
+    _panZoomScrollView.minimumZoomScale = 1.0;
+    _panZoomScrollView.maximumZoomScale = 5.0;
+    _panZoomScrollView.autoresizingMask =
+      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+    // Add the scroll view to the container
+    [_containerView addSubview:_panZoomScrollView];
+
+    //
+    //  C) Our "content" view that holds BOTH background & PKCanvasView
+    //
+    //     We'll return this from viewForZoomingInScrollView:
+    //
+    _zoomableContentView = [[UIView alloc] initWithFrame:_panZoomScrollView.bounds];
+    _zoomableContentView.autoresizingMask =
+      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+    // By default, fill the scroll view
+    [_panZoomScrollView addSubview:_zoomableContentView];
+    _panZoomScrollView.contentSize = _zoomableContentView.bounds.size;
+
+    //
+    //  D) Background image inside _zoomableContentView
+    //
+    _backgroundImageView = [[UIImageView alloc] initWithFrame:_zoomableContentView.bounds];
+    _backgroundImageView.autoresizingMask =
+      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _backgroundImageView.contentMode = UIViewContentModeScaleAspectFit;
 
-    // Generate a plain white image as the default
-      UIImage *defaultWhiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
-                                                          size:_backgroundImageView.bounds.size];
+    // Default to a white image so there’s never just black
+    UIImage *defaultWhite =
+      [RNPencilKit imageWithColor:[UIColor whiteColor]
+                             size:_zoomableContentView.bounds.size];
+    _backgroundImageView.image = defaultWhite;
 
-    _backgroundImageView.image = defaultWhiteImage;
-    [_containerView addSubview:_backgroundImageView];
+    [_zoomableContentView addSubview:_backgroundImageView];
 
-    // Create the PKCanvasView on top
-    _view = [[PKCanvasView alloc] initWithFrame:frame];
-    _view.delegate = self;
+    //
+    //  E) Create PKCanvasView (transparent), place it ON TOP of the background
+    //
+    _view = [[PKCanvasView alloc] initWithFrame:_zoomableContentView.bounds];
+    _view.delegate = self; // PKCanvasViewDelegate
+    _view.drawingPolicy = PKCanvasViewDrawingPolicyAnyInput;
+    _view.autoresizingMask =
+      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
-    // Enable pinch zoom and panning (PKCanvasView is a subclass of UIScrollView)
-    _view.minimumZoomScale = 1.0;
-    _view.maximumZoomScale = 5.0;
-    _view.zoomScale = 1.0;
-    _view.delegate = self; // for scroll/zoom handling
+    // CRUCIAL: Disable PKCanvasView’s own scroll/pinch
+    _view.scrollEnabled = NO;
 
-    // Tool picker setup
+    // If we want it transparent by default (over background):
+    _view.opaque = NO;
+    _view.backgroundColor = [UIColor clearColor];
+
+    [_zoomableContentView addSubview:_view];
+
+    //
+    //  F) ToolPicker setup
+    //
     _toolPicker = [[PKToolPicker alloc] init];
     [_toolPicker addObserver:_view];
     [_toolPicker addObserver:self];
     [_toolPicker setVisible:YES forFirstResponder:_view];
 
-    // Add the canvas on top of the background image
-    _view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [_containerView addSubview:_view];
-
-    // Our containerView is the main contentView for React
+    //
+    //  G) Finally, set containerView as RN content
+    //
     self.contentView = _containerView;
   }
   return self;
 }
+
+
+
 
 - (void)dealloc {
   [_toolPicker removeObserver:_view];
   [_toolPicker removeObserver:self];
 }
 
+#pragma mark - Updating Props
+
 - (void)updateProps:(Props::Shared const &)props oldProps:(Props::Shared const &)oldProps {
-  const auto &prev = *std::static_pointer_cast<RNPencilKitProps const>(_props);
-  const auto &next = *std::static_pointer_cast<RNPencilKitProps const>(props);
+  // Cast to your custom RNPencilKitProps
+  auto prev = std::static_pointer_cast<const RNPencilKitProps>(_props);
+  auto next = std::static_pointer_cast<const RNPencilKitProps>(props);
 
   // alwaysBounceVertical
-  if (prev.alwaysBounceVertical ^ next.alwaysBounceVertical) {
-    _view.alwaysBounceVertical = next.alwaysBounceVertical;
+  if (prev->alwaysBounceVertical ^ next->alwaysBounceVertical) {
+    _view.alwaysBounceVertical = next->alwaysBounceVertical;
   }
   // alwaysBounceHorizontal
-  if (prev.alwaysBounceHorizontal ^ next.alwaysBounceHorizontal) {
-    _view.alwaysBounceHorizontal = next.alwaysBounceHorizontal;
+  if (prev->alwaysBounceHorizontal ^ next->alwaysBounceHorizontal) {
+    _view.alwaysBounceHorizontal = next->alwaysBounceHorizontal;
   }
 
+
+    // IMAGE URL LOADING - FIXED
+    if (prev->imageURL != next->imageURL) {
+        RCTLogInfo(@"[RNPencilKit] Attempting to set background using imageURL: %s",
+                   next->imageURL.c_str());
+
+        if (!next->imageURL.empty()) {
+            std::string urlString = next->imageURL;
+            NSString *nsUrlString = [NSString stringWithUTF8String:urlString.c_str()];
+            NSURL *url = [NSURL URLWithString:nsUrlString];
+
+            RCTLogInfo(@"[RNPencilKit] Constructed NSURL: %@", url);
+
+            if (url) {
+                // Load the image asynchronously
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+                    NSError *error = nil;
+                    NSData *imgData = [NSData dataWithContentsOfURL:url options:0 error:&error];
+
+                    if (error || !imgData) {
+                        RCTLogInfo(@"[RNPencilKit] Failed to load image data: %@", error);
+                        return;
+                    }
+
+                    UIImage *loadedImage = [UIImage imageWithData:imgData];
+                    if (!loadedImage) {
+                        RCTLogInfo(@"[RNPencilKit] UIImage is nil after decoding data.");
+                        return;
+                    }
+
+                    // Ensure UI updates happen on main thread
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        RCTLogInfo(@"[RNPencilKit] Successfully loaded UIImage. Setting background now.");
+
+                        _backgroundImageView.image = loadedImage;
+                        _backgroundImageView.hidden = NO;
+                        _backgroundImageView.alpha = 1.0;
+
+                        // Force layout update to ensure image is visible
+                        [_backgroundImageView setNeedsLayout];
+                        [_backgroundImageView layoutIfNeeded];
+
+                        // Debugging: Print the actual frame size of the image view
+                        RCTLogInfo(@"[RNPencilKit] Background Image View Size: Width = %f, Height = %f",
+                                   _backgroundImageView.bounds.size.width, _backgroundImageView.bounds.size.height);
+                    });
+                });
+            } else {
+                RCTLogInfo(@"[RNPencilKit] Invalid NSURL generated.");
+            }
+        } else {
+            // Reset to default background if imageURL is empty
+            RCTLogInfo(@"[RNPencilKit] Received empty imageURL. Resetting to white background.");
+
+            UIImage *whiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
+                                                        size:_backgroundImageView.bounds.size];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                _backgroundImageView.image = whiteImage;
+                _backgroundImageView.hidden = NO;
+                _backgroundImageView.alpha = 1.0;
+                [_backgroundImageView setNeedsLayout];
+                [_backgroundImageView layoutIfNeeded];
+            });
+        }
+    }
+
+
+
+
+
   // drawingPolicy
-  if (prev.drawingPolicy != next.drawingPolicy) {
-    _view.drawingPolicy = (next.drawingPolicy == RNPencilKitDrawingPolicy::Anyinput
-                           ? PKCanvasViewDrawingPolicyAnyInput
-                           : next.drawingPolicy == RNPencilKitDrawingPolicy::Default
-                             ? PKCanvasViewDrawingPolicyDefault
-                             : PKCanvasViewDrawingPolicyPencilOnly);
+  if (prev->drawingPolicy != next->drawingPolicy) {
+    _view.drawingPolicy =
+    (next->drawingPolicy == RNPencilKitDrawingPolicy::Anyinput
+     ? PKCanvasViewDrawingPolicyAnyInput
+     : next->drawingPolicy == RNPencilKitDrawingPolicy::Default
+       ? PKCanvasViewDrawingPolicyDefault
+       : PKCanvasViewDrawingPolicyPencilOnly);
   }
 
   // Ruler
-  if (prev.isRulerActive ^ next.isRulerActive) {
-    [_view setRulerActive:next.isRulerActive];
+  if (prev->isRulerActive ^ next->isRulerActive) {
+    [_view setRulerActive:next->isRulerActive];
   }
 
   // Opacity
-  if (prev.isOpaque ^ next.isOpaque) {
-    [_view setOpaque:next.isOpaque];
-  }
+    if (prev->isOpaque ^ next->isOpaque) {
+       _view.opaque = next->isOpaque;
+       if (!next->isOpaque) {
+         // Make canvas truly transparent
+         _view.backgroundColor = [UIColor clearColor];
+       }
+     }
 
   // Background color
-  if (prev.backgroundColor ^ next.backgroundColor) {
-    [_view setBackgroundColor:intToColor(next.backgroundColor)];
+  if (prev->backgroundColor ^ next->backgroundColor) {
+    [_view setBackgroundColor:intToColor(next->backgroundColor)];
   }
 
+  // -----------------------------------------------------------------------
+  // NOTE: We removed the direct 'imageURL' usage from here because RNPencilKitProps
+  // does not define it. We'll rely on the RCT_CUSTOM_VIEW_PROPERTY below.
+  // -----------------------------------------------------------------------
+
+  // Finally, store the new props and call super
+  _props = next; // properly cast above
   [super updateProps:props oldProps:oldProps];
 }
+
+#pragma mark - Public Methods
 
 - (void)clear {
   [_view setDrawing:[[PKDrawing alloc] init]];
@@ -168,7 +369,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
     return nil;
   }
   UIImage *image = [_view.drawing imageFromRect:_view.bounds
-                                          scale:scale == 0 ? UIScreen.mainScreen.scale : scale];
+                                          scale:(scale == 0 ? UIScreen.mainScreen.scale : scale)];
   NSData *imageData = UIImagePNGRepresentation(image);
   return [imageData base64EncodedStringWithOptions:0];
 }
@@ -179,8 +380,8 @@ getEmitter(const SharedViewEventEmitter emitter) {
     return nil;
   }
   UIImage *image = [_view.drawing imageFromRect:_view.bounds
-                                          scale:scale == 0 ? UIScreen.mainScreen.scale : scale];
-  NSData *imageData = UIImageJPEGRepresentation(image, compression == 0 ? 0.93 : compression);
+                                          scale:(scale == 0 ? UIScreen.mainScreen.scale : scale)];
+  NSData *imageData = UIImageJPEGRepresentation(image, (compression == 0 ? 0.93 : compression));
   return [imageData base64EncodedStringWithOptions:0];
 }
 
@@ -220,7 +421,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
     return NO;
   }
 
-  // Scale drawing if it's bigger than canvas
+  // Scale if bigger than the canvas
   CGRect drawingBounds = drawing.bounds;
   if (!CGRectIsEmpty(drawingBounds)) {
     CGSize targetSize = _view.bounds.size;
@@ -263,7 +464,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
   [_view removeFromSuperview];
   _view = newCanvas;
 
-  // Re-add the new canvas above the background image
+  // Re-add the new canvas above the background
   [_containerView addSubview:_view];
   [_view.undoManager removeAllActions];
   [_view setDrawing:drawing];
@@ -287,12 +488,11 @@ getEmitter(const SharedViewEventEmitter emitter) {
     [newView becomeFirstResponder];
   }
 
-  // Copy zoom/pan settings
+  // Copy zoom/pan
   newView.minimumZoomScale = v.minimumZoomScale;
   newView.maximumZoomScale = v.maximumZoomScale;
   newView.zoomScale = v.zoomScale;
   newView.delegate = self;
-
   return newView;
 }
 
@@ -303,51 +503,50 @@ getEmitter(const SharedViewEventEmitter emitter) {
   double defaultWidth = 1.0;
   UIColor *defaultColor = [UIColor blackColor];
 
-  // Pen, Pencil, Marker
   if (tool == "pen") {
     _toolPicker.selectedTool = _view.tool =
-      [[PKInkingTool alloc] initWithInkType:PKInkTypePen
-                                      color:(isColorValid ? intToColor(color) : defaultColor)
-                                      width:(isWidthValid ? width : defaultWidth)];
+    [[PKInkingTool alloc] initWithInkType:PKInkTypePen
+                                    color:(isColorValid ? intToColor(color) : defaultColor)
+                                    width:(isWidthValid ? width : defaultWidth)];
   }
   if (tool == "pencil") {
     _toolPicker.selectedTool = _view.tool =
-      [[PKInkingTool alloc] initWithInkType:PKInkTypePencil
-                                      color:(isColorValid ? intToColor(color) : defaultColor)
-                                      width:(isWidthValid ? width : defaultWidth)];
+    [[PKInkingTool alloc] initWithInkType:PKInkTypePencil
+                                    color:(isColorValid ? intToColor(color) : defaultColor)
+                                    width:(isWidthValid ? width : defaultWidth)];
   }
   if (tool == "marker") {
     _toolPicker.selectedTool = _view.tool =
-      [[PKInkingTool alloc] initWithInkType:PKInkTypeMarker
-                                      color:(isColorValid ? intToColor(color) : defaultColor)
-                                      width:(isWidthValid ? width : defaultWidth)];
+    [[PKInkingTool alloc] initWithInkType:PKInkTypeMarker
+                                    color:(isColorValid ? intToColor(color) : defaultColor)
+                                    width:(isWidthValid ? width : defaultWidth)];
   }
 
   // iOS 17 extra tools
   if (@available(iOS 17.0, *)) {
     if (tool == "monoline") {
       _toolPicker.selectedTool = _view.tool =
-        [[PKInkingTool alloc] initWithInkType:PKInkTypeMonoline
-                                        color:(isColorValid ? intToColor(color) : defaultColor)
-                                        width:(isWidthValid ? width : defaultWidth)];
+      [[PKInkingTool alloc] initWithInkType:PKInkTypeMonoline
+                                      color:(isColorValid ? intToColor(color) : defaultColor)
+                                      width:(isWidthValid ? width : defaultWidth)];
     }
     if (tool == "fountainPen") {
       _toolPicker.selectedTool = _view.tool =
-        [[PKInkingTool alloc] initWithInkType:PKInkTypeFountainPen
-                                        color:(isColorValid ? intToColor(color) : defaultColor)
-                                        width:(isWidthValid ? width : defaultWidth)];
+      [[PKInkingTool alloc] initWithInkType:PKInkTypeFountainPen
+                                      color:(isColorValid ? intToColor(color) : defaultColor)
+                                      width:(isWidthValid ? width : defaultWidth)];
     }
     if (tool == "watercolor") {
       _toolPicker.selectedTool = _view.tool =
-        [[PKInkingTool alloc] initWithInkType:PKInkTypeWatercolor
-                                        color:(isColorValid ? intToColor(color) : defaultColor)
-                                        width:(isWidthValid ? width : defaultWidth)];
+      [[PKInkingTool alloc] initWithInkType:PKInkTypeWatercolor
+                                      color:(isColorValid ? intToColor(color) : defaultColor)
+                                      width:(isWidthValid ? width : defaultWidth)];
     }
     if (tool == "crayon") {
       _toolPicker.selectedTool = _view.tool =
-        [[PKInkingTool alloc] initWithInkType:PKInkTypeCrayon
-                                        color:(isColorValid ? intToColor(color) : defaultColor)
-                                        width:(isWidthValid ? width : defaultWidth)];
+      [[PKInkingTool alloc] initWithInkType:PKInkTypeCrayon
+                                      color:(isColorValid ? intToColor(color) : defaultColor)
+                                      width:(isWidthValid ? width : defaultWidth)];
     }
   }
 
@@ -355,28 +554,28 @@ getEmitter(const SharedViewEventEmitter emitter) {
   if (tool == "eraserVector") {
     if (@available(iOS 16.4, *)) {
       _toolPicker.selectedTool = _view.tool =
-        [[PKEraserTool alloc] initWithEraserType:PKEraserTypeVector
-                                           width:(isWidthValid ? width : defaultWidth)];
+      [[PKEraserTool alloc] initWithEraserType:PKEraserTypeVector
+                                         width:(isWidthValid ? width : defaultWidth)];
     } else {
       _toolPicker.selectedTool = _view.tool =
-        [[PKEraserTool alloc] initWithEraserType:PKEraserTypeVector];
+      [[PKEraserTool alloc] initWithEraserType:PKEraserTypeVector];
     }
   }
   if (tool == "eraserBitmap") {
     if (@available(iOS 16.4, *)) {
       _toolPicker.selectedTool = _view.tool =
-        [[PKEraserTool alloc] initWithEraserType:PKEraserTypeBitmap
-                                           width:(isWidthValid ? width : defaultWidth)];
+      [[PKEraserTool alloc] initWithEraserType:PKEraserTypeBitmap
+                                         width:(isWidthValid ? width : defaultWidth)];
     } else {
       _toolPicker.selectedTool = _view.tool =
-        [[PKEraserTool alloc] initWithEraserType:PKEraserTypeBitmap];
+      [[PKEraserTool alloc] initWithEraserType:PKEraserTypeBitmap];
     }
   }
   if (@available(iOS 16.4, *)) {
     if (tool == "eraserFixedWidthBitmap") {
       _toolPicker.selectedTool = _view.tool =
-        [[PKEraserTool alloc] initWithEraserType:PKEraserTypeFixedWidthBitmap
-                                           width:(isWidthValid ? width : defaultWidth)];
+      [[PKEraserTool alloc] initWithEraserType:PKEraserTypeFixedWidthBitmap
+                                         width:(isWidthValid ? width : defaultWidth)];
     }
   }
 }
@@ -460,3 +659,40 @@ Class<RCTComponentViewProtocol> RNPencilKitCls(void) {
 }
 
 @end
+
+//#pragma mark - ImageURL Custom Prop
+//@implementation RNPencilKit (BackgroundImageProp)
+//
+//RCT_CUSTOM_VIEW_PROPERTY(imageURL, NSString, RNPencilKit)
+//{
+//    RCTLogInfo(@"[RNPencilKit] Received imageURL:");
+//
+//  RNPencilKit *pencilKitView = (RNPencilKit *)view;
+//  RCTLogInfo(@"[RNPencilKit] Received imageURL: %@", json);
+//
+//
+//  if ([json isKindOfClass:[NSString class]] && [(NSString *)json length] > 0) {
+//    NSString *urlString = (NSString *)json;
+//    NSURL *url = [NSURL URLWithString:urlString];
+//
+//    if (url) {
+//      NSError *error = nil;
+//      NSData *imgData = [NSData dataWithContentsOfURL:url options:0 error:&error];
+//
+//      if (!error && imgData) {
+//        UIImage *loadedImage = [UIImage imageWithData:imgData];
+//        if (loadedImage) {
+//            RCTLogInfo(@"[RNPencilKit] Received imageURL");
+//
+//          pencilKitView->_backgroundImageView.image = loadedImage;
+//          return;
+//        }
+//      }
+//    }
+//  }
+//  UIImage *whiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
+//                                               size:pencilKitView->_backgroundImageView.bounds.size];
+//  pencilKitView->_backgroundImageView.image = whiteImage;
+//}
+//
+//@end
