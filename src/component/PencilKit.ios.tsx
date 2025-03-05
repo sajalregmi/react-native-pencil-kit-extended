@@ -41,6 +41,7 @@ function PencilKitComponent(
       hideToolPicker: () => Commands.hideToolPicker(nativeRef.current!),
       redo: () => Commands.redo(nativeRef.current!),
       undo: () => Commands.undo(nativeRef.current!),
+      loadStroke: (strokeBase64) => Commands.loadStroke(nativeRef.current!, strokeBase64),
       saveDrawing: async (path) => {
         const handle = findNodeHandle(nativeRef.current) ?? -1;
         return NativeRNPencilKitUtil.saveDrawing(handle, path);
@@ -95,7 +96,7 @@ function PencilKitComponent(
       drawingPolicy={drawingPolicy}
       backgroundColor={processColor(backgroundColor) as number}
       isOpaque={isOpaque}
-      imageURL= {imageURL}// <-- pass the new optional prop
+      imageURL= {imageURL}
       onToolPickerFramesObscuredDidChange={onToolPickerFramesObscuredDidChange}
       onToolPickerIsRulerActiveDidChange={onToolPickerIsRulerActiveDidChange}
       onToolPickerSelectedToolDidChange={onToolPickerSelectedToolDidChange}
