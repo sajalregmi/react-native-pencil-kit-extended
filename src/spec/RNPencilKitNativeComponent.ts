@@ -10,6 +10,12 @@ import type {
 import codegenNativeCommands from 'react-native/Libraries/Utilities/codegenNativeCommands';
 import codegenNativeComponent from 'react-native/Libraries/Utilities/codegenNativeComponent';
 
+export type CanvasViewDrawingDidChangeEvent = Readonly<{
+  addedStrokes?: string[];    // array of newly added strokes in base64
+  removedStrokes?: string[];  // array of newly removed strokes in base64
+}>;
+
+
 export interface NativeProps extends ViewProps {
   alwaysBounceVertical: boolean;
   alwaysBounceHorizontal: boolean;
@@ -25,7 +31,7 @@ export interface NativeProps extends ViewProps {
   onToolPickerSelectedToolDidChange?: DirectEventHandler<{}>;
   onCanvasViewDidBeginUsingTool?: DirectEventHandler<{}>;
   onCanvasViewDidEndUsingTool?: DirectEventHandler<{}>;
-  onCanvasViewDrawingDidChange?: DirectEventHandler<{}>;
+  onCanvasViewDrawingDidChange?: DirectEventHandler<CanvasViewDrawingDidChangeEvent>;
   onCanvasViewDidFinishRendering?: DirectEventHandler<{}>;
 }
 
@@ -41,10 +47,16 @@ export interface PencilKitCommands {
     width?: Double,
     color?: Int32,
   ) => void;
+
+  loadStroke: (
+    ref: React.ElementRef<ComponentType>,
+    strokeBase64: string
+  ) => void;
+
 }
 
 export const Commands: PencilKitCommands = codegenNativeCommands<PencilKitCommands>({
-  supportedCommands: ['clear', 'showToolPicker', 'hideToolPicker', 'redo', 'undo', 'setTool'],
+  supportedCommands: ['clear', 'showToolPicker', 'hideToolPicker', 'redo', 'undo', 'setTool', 'loadStroke'],
 });
 
 // The "RNPencilKit" string must match your native component name
