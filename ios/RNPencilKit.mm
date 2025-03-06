@@ -377,18 +377,24 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 - (BOOL)loadBase64Data:(NSString *)base64 {
+  // Mark the update as programmatic.
+  self.isProgrammaticUpdate = YES;
+  
   NSData *data = [[NSData alloc] initWithBase64EncodedString:base64
                                                      options:NSDataBase64DecodingIgnoreUnknownCharacters];
   if (!data) {
+    self.isProgrammaticUpdate = NO;
     return NO;
   }
+  
   NSError *error = nil;
   PKDrawing *drawing = [[PKDrawing alloc] initWithData:data error:&error];
   if (error || !drawing) {
+    self.isProgrammaticUpdate = NO;
     return NO;
   }
-
-  // Scale if bigger than the canvas
+  
+  // Scale if the drawing is larger than the canvas.
   CGRect drawingBounds = drawing.bounds;
   if (!CGRectIsEmpty(drawingBounds)) {
     CGSize targetSize = _view.bounds.size;
@@ -399,26 +405,40 @@ getEmitter(const SharedViewEventEmitter emitter) {
         CGFloat scaleX = targetSize.width / CGRectGetWidth(drawingBounds);
         CGFloat scaleY = targetSize.height / CGRectGetHeight(drawingBounds);
         CGFloat scale = MIN(scaleX, scaleY);
-
+  
         CGFloat offsetX = (targetSize.width - (drawingBounds.size.width * scale)) / 2
                           - (drawingBounds.origin.x * scale);
         CGFloat offsetY = (targetSize.height - (drawingBounds.size.height * scale)) / 2
                           - (drawingBounds.origin.y * scale);
-
+  
         CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
         transform = CGAffineTransformTranslate(transform, offsetX / scale, offsetY / scale);
-
+  
         PKDrawing *transformedDrawing = [drawing drawingByApplyingTransform:transform];
         drawing = transformedDrawing;
       }
     }
   }
-  [_view setDrawing:drawing];
-   [_view.undoManager removeAllActions];
-  _previousDrawing = _view.drawing;
-
+  
+  // Update the drawing on the main thread as an atomic update:
+  dispatch_async(dispatch_get_main_queue(), ^{
+    // First, clear everything.
+    [_view setDrawing:[[PKDrawing alloc] init]];
+    [_view.undoManager removeAllActions];
+    _previousDrawing = _view.drawing;
+    
+    // Then, set the new drawing from the Base64 data.
+    [_view setDrawing:drawing];
+    [_view.undoManager removeAllActions];
+    _previousDrawing = _view.drawing;
+    
+    // Reset the programmatic update flag.
+    self.isProgrammaticUpdate = NO;
+  });
+  
   return YES;
 }
+
 
 - (BOOL)loadWithData:(NSData *)data {
   if (!data) {
