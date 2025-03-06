@@ -19,6 +19,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
 @interface RNPencilKit () <RCTRNPencilKitViewProtocol, PKCanvasViewDelegate, PKToolPickerObserver, UIScrollViewDelegate>
 // We adopt UIScrollViewDelegate to handle zoom/pan.
+@property (nonatomic, assign) BOOL isProgrammaticUpdate;
 @end
 
 #pragma mark - Image Helper
@@ -558,10 +559,16 @@ getEmitter(const SharedViewEventEmitter emitter) {
  * but just for this stroke. Then we append it to the existing drawing.
  */
 - (BOOL)loadBase64Stroke:(NSString *)base64 {
+    
+    self.isProgrammaticUpdate = YES;
+
+    
+    RCTLogInfo(@"[RNPencilKit loadBase64StrokeCalled to add ");
   // 1) Decode base64 -> PKDrawing
   NSData *data = [[NSData alloc] initWithBase64EncodedString:base64
                                                      options:NSDataBase64DecodingIgnoreUnknownCharacters];
   if (!data) {
+      self.isProgrammaticUpdate = NO;
     RCTLogError(@"[RNPencilKit] loadBase64Stroke: Could not decode base64 data!");
     return NO;
   }
@@ -569,6 +576,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
   NSError *error = nil;
   PKDrawing *incomingDrawing = [[PKDrawing alloc] initWithData:data error:&error];
   if (error || !incomingDrawing || incomingDrawing.strokes.count == 0) {
+      self.isProgrammaticUpdate = NO;
     RCTLogError(@"[RNPencilKit] loadBase64Stroke: No valid stroke in base64 data!");
     return NO;
   }
@@ -611,6 +619,10 @@ getEmitter(const SharedViewEventEmitter emitter) {
   PKDrawing *current = _view.drawing;
   PKDrawing *merged = [current drawingByAppendingDrawing:singleStrokeDrawing];
   [_view setDrawing:merged];
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+           self.isProgrammaticUpdate = NO;
+       });
 
   return YES;
 }
@@ -684,12 +696,17 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
 - (void)applyStrokeDiffWithAddedStrokes:(NSArray<NSString *> *)addedStrokesBase64
                          removedStrokes:(NSArray<NSString *> *)removedStrokesBase64 {
-    // 1. Remove strokes from current drawing
+
+    // Mark the entire diff as a programmatic update.
+    self.isProgrammaticUpdate = YES;
+    
+    // 1. Start with current strokes.
     NSMutableArray<PKStroke *> *currentStrokes = [NSMutableArray arrayWithArray:_view.drawing.strokes];
     RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Initial current strokes count: %lu", (unsigned long)currentStrokes.count);
     
     BOOL allRemovalsSuccessful = YES;
     
+    // 2. Process removals.
     for (NSString *removedStrokeBase64 in removedStrokesBase64) {
         RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing removed stroke base64: %@", removedStrokeBase64);
         
@@ -711,11 +728,9 @@ getEmitter(const SharedViewEventEmitter emitter) {
         
         RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Incoming drawing contains %lu stroke(s)", (unsigned long)incomingDrawing.strokes.count);
         
-        // For each stroke in the removed drawing, try to find a matching stroke in currentStrokes.
+        // For each stroke in the incoming (removed) drawing, find a matching stroke in currentStrokes.
         for (PKStroke *strokeToRemove in incomingDrawing.strokes) {
             RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Stroke to remove details: %@", [self loggableDescriptionForStroke:strokeToRemove]);
-            
-            // Detailed logging for the removed stroke.
             RCTLogInfo(@"[RNPencilKit] Detailed removed stroke info: Ink: %@, Transform: %@, RenderBounds: %@, RandomSeed: %u, Mask: %@, MaskedPathRanges: %@, Path: %@, Point Count: %lu",
                        strokeToRemove.ink,
                        NSStringFromCGAffineTransform(strokeToRemove.transform),
@@ -729,8 +744,6 @@ getEmitter(const SharedViewEventEmitter emitter) {
             BOOL foundAndRemoved = NO;
             for (PKStroke *existingStroke in [currentStrokes copy]) {
                 RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Existing stroke details: %@", [self loggableDescriptionForStroke:existingStroke]);
-                
-                // Detailed logging for the existing stroke.
                 RCTLogInfo(@"[RNPencilKit] Detailed existing stroke info: Ink: %@, Transform: %@, RenderBounds: %@, RandomSeed: %u, Mask: %@, MaskedPathRanges: %@, Path: %@, Point Count: %lu",
                            existingStroke.ink,
                            NSStringFromCGAffineTransform(existingStroke.transform),
@@ -755,29 +768,81 @@ getEmitter(const SharedViewEventEmitter emitter) {
         }
     }
     
+    // Abort if any removal failed.
     if (!allRemovalsSuccessful) {
         RCTLogWarn(@"[RNPencilKit] applyStrokeDiff: Not all removals were successful. Aborting diff application.");
+        self.isProgrammaticUpdate = NO;
         return;
     }
     
-    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Strokes count after removal: %lu", (unsigned long)currentStrokes.count);
-    PKDrawing *drawingAfterRemoval = [[PKDrawing alloc] initWithStrokes:currentStrokes];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [_view setDrawing:drawingAfterRemoval];
-        [_view.undoManager removeAllActions];
-        _previousDrawing = drawingAfterRemoval;
-    });
+    // 3. Process additions.
+    // Start with a mutable array that includes the current strokes after removals.
+    NSMutableArray<PKStroke *> *finalStrokes = [NSMutableArray arrayWithArray:currentStrokes];
     
-    // 2. Process added strokes only if removals were all successful.
-    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing %lu added stroke(s)", (unsigned long)addedStrokesBase64.count);
     for (NSString *addedStrokeBase64 in addedStrokesBase64) {
         RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing added stroke base64: %@", addedStrokeBase64);
-        BOOL success = [self loadBase64Stroke:addedStrokeBase64];
-        if (!success) {
-            RCTLogError(@"[RNPencilKit] applyStrokeDiff: Failed to load added stroke.");
+        
+        NSData *data = [[NSData alloc] initWithBase64EncodedString:addedStrokeBase64
+                                                           options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        if (!data) {
+            RCTLogError(@"[RNPencilKit] applyStrokeDiff: Failed to decode base64 for added stroke.");
+            continue;
+        }
+        
+        NSError *error = nil;
+        PKDrawing *incomingDrawing = [[PKDrawing alloc] initWithData:data error:&error];
+        if (error || !incomingDrawing || incomingDrawing.strokes.count == 0) {
+            RCTLogError(@"[RNPencilKit] applyStrokeDiff: Invalid added stroke data.");
+            continue;
+        }
+        
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Incoming added drawing contains %lu stroke(s)", (unsigned long)incomingDrawing.strokes.count);
+        
+        // Process each added stroke: scale/translate if needed, then add its strokes.
+        for (PKStroke *strokeToAdd in incomingDrawing.strokes) {
+            RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Stroke to add details: %@", [self loggableDescriptionForStroke:strokeToAdd]);
+            
+            // Create a temporary drawing for scaling.
+            PKDrawing *tempDrawing = [[PKDrawing alloc] initWithStrokes:@[ strokeToAdd ]];
+            CGRect strokeBounds = tempDrawing.bounds;
+            if (!CGRectIsEmpty(strokeBounds)) {
+                CGSize targetSize = _view.bounds.size;
+                if (targetSize.width > 0 && targetSize.height > 0) {
+                    BOOL alreadyFits = (CGRectGetWidth(strokeBounds) <= targetSize.width &&
+                                        CGRectGetHeight(strokeBounds) <= targetSize.height);
+                    if (!alreadyFits) {
+                        CGFloat scaleX = targetSize.width / CGRectGetWidth(strokeBounds);
+                        CGFloat scaleY = targetSize.height / CGRectGetHeight(strokeBounds);
+                        CGFloat scale = MIN(scaleX, scaleY);
+                        
+                        CGFloat offsetX = (targetSize.width - (strokeBounds.size.width * scale)) / 2
+                                          - (strokeBounds.origin.x * scale);
+                        CGFloat offsetY = (targetSize.height - (strokeBounds.size.height * scale)) / 2
+                                          - (strokeBounds.origin.y * scale);
+                        
+                        CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
+                        transform = CGAffineTransformTranslate(transform, offsetX / scale, offsetY / scale);
+                        tempDrawing = [tempDrawing drawingByApplyingTransform:transform];
+                    }
+                }
+            }
+            // Add the strokes from the (possibly scaled) drawing.
+            [finalStrokes addObjectsFromArray:tempDrawing.strokes];
         }
     }
+    
+    // 4. Create a final drawing from all strokes.
+    PKDrawing *finalDrawing = [[PKDrawing alloc] initWithStrokes:finalStrokes];
+    
+    // 5. Update the drawing on the main thread in one atomic update.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_view setDrawing:finalDrawing];
+        [_view.undoManager removeAllActions];
+        _previousDrawing = finalDrawing;
+        self.isProgrammaticUpdate = NO;
+    });
 }
+
 
 
 @end
@@ -793,6 +858,11 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 - (void)canvasViewDrawingDidChange:(PKCanvasView *)canvasView {
+    
+    if (self.isProgrammaticUpdate) {
+      return;
+    }
+    
   if (auto e = getEmitter(_eventEmitter)) {
     // 1) Convert old and new strokes to arrays
     NSArray<PKStroke *> *oldStrokes = _previousDrawing.strokes;
