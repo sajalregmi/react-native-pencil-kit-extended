@@ -306,7 +306,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
 - (void)clear {
   [_view setDrawing:[[PKDrawing alloc] init]];
   [_view.undoManager removeAllActions];
-  _previousDrawing = _view.drawing;
+    _previousDrawing = _view.drawing; // FIX: update previous drawing
 }
 
 
@@ -425,14 +425,10 @@ getEmitter(const SharedViewEventEmitter emitter) {
     // First, clear everything.
     [_view setDrawing:[[PKDrawing alloc] init]];
     [_view.undoManager removeAllActions];
-    _previousDrawing = _view.drawing;
-    
     // Then, set the new drawing from the Base64 data.
     [_view setDrawing:drawing];
     [_view.undoManager removeAllActions];
     _previousDrawing = _view.drawing;
-    
-    // Reset the programmatic update flag.
     self.isProgrammaticUpdate = NO;
   });
   
@@ -638,9 +634,10 @@ getEmitter(const SharedViewEventEmitter emitter) {
   // 3) Merge that stroke(s) with the existing drawing:
   PKDrawing *current = _view.drawing;
   PKDrawing *merged = [current drawingByAppendingDrawing:singleStrokeDrawing];
-  [_view setDrawing:merged];
+
     
     dispatch_async(dispatch_get_main_queue(), ^{
+           [_view setDrawing:merged];
            self.isProgrammaticUpdate = NO;
        });
 
@@ -880,6 +877,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
 - (void)canvasViewDrawingDidChange:(PKCanvasView *)canvasView {
     
     if (self.isProgrammaticUpdate) {
+    _previousDrawing = canvasView.drawing;
       return;
     }
     
@@ -923,9 +921,11 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
     // 6) Emit event to JS
     e->onCanvasViewDrawingDidChange(std::move(payload));
+      
+      _previousDrawing = canvasView.drawing;
 
-    // 7) Update _previousDrawing for next comparison
-    _previousDrawing = canvasView.drawing;
+
+
   }
 }
 
