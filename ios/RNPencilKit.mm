@@ -50,70 +50,15 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
     UIScrollView *_panZoomScrollView;  // Controls pinch-to-zoom & pan
      UIView *_zoomableContentView;      // Holds both background + strokes
-
-
-
-
-  // Keep a copy of our props (new architecture style).
-  // If your RNPencilKitProps doesn’t actually define imageURL,
-  // we simply won't use that in updateProps.
   Props::Shared _props;
-    
+
   PKDrawing *_previousDrawing;
 
 }
 
-//- (instancetype)initWithFrame:(CGRect)frame {
-//  if (self = [super initWithFrame:frame]) {
-//    static const auto defaultProps = std::make_shared<const RNPencilKitProps>();
-//    _props = defaultProps;
-//
-//    // Create a container that holds the background image and the PKCanvasView
-//    _containerView = [[UIView alloc] initWithFrame:frame];
-//    _containerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-//    _containerView.clipsToBounds = YES;
-//
-//    // Create background image view and fill it with a white image by default
-//    _backgroundImageView = [[UIImageView alloc] initWithFrame:_containerView.bounds];
-//    _backgroundImageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-//    _backgroundImageView.contentMode = UIViewContentModeScaleAspectFit;
-//
-//    // Generate a plain white image as the default background
-//    UIImage *defaultWhiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
-//                                                        size:_backgroundImageView.bounds.size];
-//    _backgroundImageView.image = defaultWhiteImage;
-//    [_containerView addSubview:_backgroundImageView];
-//
-//    // Create the PKCanvasView on top
-//    _view = [[PKCanvasView alloc] initWithFrame:frame];
-//    _view.delegate = self;
-//
-//    // Enable pinch zoom and panning (PKCanvasView is a subclass of UIScrollView)
-//    _view.minimumZoomScale = 1.0;
-//    _view.maximumZoomScale = 5.0;
-//    _view.zoomScale = 1.0;
-//    _view.delegate = self; // for scroll/zoom handling
-//
-//    // Tool picker setup
-//    _toolPicker = [[PKToolPicker alloc] init];
-//    [_toolPicker addObserver:_view];
-//    [_toolPicker addObserver:self];
-//    [_toolPicker setVisible:YES forFirstResponder:_view];
-//
-//    // Add the canvas on top of the background image
-//    _view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-//    [_containerView addSubview:_view];
-//
-//    // Our containerView is the main contentView for React
-//    self.contentView = _containerView;
-//  }
-//  return self;
-//}
-
 #pragma mark - UIScrollViewDelegate
 
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
-  // We want the entire background + canvas to scale/pan together
   return _zoomableContentView;
 }
 
@@ -140,16 +85,10 @@ getEmitter(const SharedViewEventEmitter emitter) {
     _panZoomScrollView.maximumZoomScale = 5.0;
     _panZoomScrollView.autoresizingMask =
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-      
+
     _panZoomScrollView.panGestureRecognizer.minimumNumberOfTouches = 2;
     // Add the scroll view to the container
     [_containerView addSubview:_panZoomScrollView];
-
-    //
-    //  C) Our "content" view that holds BOTH background & PKCanvasView
-    //
-    //     We'll return this from viewForZoomingInScrollView:
-    //
     _zoomableContentView = [[UIView alloc] initWithFrame:_panZoomScrollView.bounds];
     _zoomableContentView.autoresizingMask =
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -191,7 +130,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
     _view.backgroundColor = [UIColor clearColor];
 
     [_zoomableContentView addSubview:_view];
-      
+
     _previousDrawing = [[PKDrawing alloc] init];
 
     //
@@ -365,7 +304,10 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
 - (void)clear {
   [_view setDrawing:[[PKDrawing alloc] init]];
+  [_view.undoManager removeAllActions];
+  _previousDrawing = _view.drawing;
 }
+
 
 - (void)showToolPicker {
   [_view becomeFirstResponder];
@@ -471,6 +413,9 @@ getEmitter(const SharedViewEventEmitter emitter) {
     }
   }
   [_view setDrawing:drawing];
+   [_view.undoManager removeAllActions];
+  _previousDrawing = _view.drawing;
+
   return YES;
 }
 
@@ -670,6 +615,171 @@ getEmitter(const SharedViewEventEmitter emitter) {
   return YES;
 }
 
+
+// Helper method to create a string representation for a stroke.
+- (NSString *)loggableDescriptionForStroke:(PKStroke *)stroke {
+  NSMutableString *description = [NSMutableString string];
+  [description appendFormat:@"Stroke details - Ink: %@, Transform: %@", stroke.ink, NSStringFromCGAffineTransform(stroke.transform)];
+  if (stroke.path) {
+    [description appendFormat:@", Point count: %lu", (unsigned long)stroke.path.count];
+  }
+  return description;
+}
+
+- (BOOL)stroke:(PKStroke *)stroke1 isEqualToStroke:(PKStroke *)stroke2 {
+    RCTLogInfo(@"[RNPencilKit] Comparing strokes using custom function.");
+    
+    // Compare ink properties.
+    if (![stroke1.ink isEqual:stroke2.ink]) {
+        RCTLogInfo(@"[RNPencilKit] Inks differ: %@ vs %@", stroke1.ink, stroke2.ink);
+        return NO;
+    }
+    RCTLogInfo(@"[RNPencilKit] Inks are equal.");
+    
+    // Compare paths by count (you could extend this to compare each control point with tolerance).
+    if (stroke1.path.count != stroke2.path.count) {
+        RCTLogInfo(@"[RNPencilKit] Path counts differ: %lu vs %lu", (unsigned long)stroke1.path.count, (unsigned long)stroke2.path.count);
+        return NO;
+    }
+    RCTLogInfo(@"[RNPencilKit] Path counts are equal (%lu points).", (unsigned long)stroke1.path.count);
+    
+    // Compare randomSeed.
+    if (stroke1.randomSeed != stroke2.randomSeed) {
+        RCTLogInfo(@"[RNPencilKit] Random seeds differ: %u vs %u", stroke1.randomSeed, stroke2.randomSeed);
+        return NO;
+    }
+    RCTLogInfo(@"[RNPencilKit] Random seeds are equal.");
+    
+    // Compare mask (if any) – if both nil or equal, then it's fine.
+    if ((stroke1.mask && ![stroke1.mask isEqual:stroke2.mask]) ||
+        (!stroke1.mask && stroke2.mask)) {
+        RCTLogInfo(@"[RNPencilKit] Masks differ: %@ vs %@", stroke1.mask, stroke2.mask);
+        return NO;
+    }
+    RCTLogInfo(@"[RNPencilKit] Masks are equal.");
+    
+    // Compare maskedPathRanges arrays.
+    if (stroke1.maskedPathRanges.count != stroke2.maskedPathRanges.count) {
+        RCTLogInfo(@"[RNPencilKit] Masked path ranges counts differ: %lu vs %lu", (unsigned long)stroke1.maskedPathRanges.count, (unsigned long)stroke2.maskedPathRanges.count);
+        return NO;
+    }
+    for (NSInteger i = 0; i < stroke1.maskedPathRanges.count; i++) {
+        id range1 = stroke1.maskedPathRanges[i];
+        id range2 = stroke2.maskedPathRanges[i];
+        if (![range1 isEqual:range2]) {
+            RCTLogInfo(@"[RNPencilKit] Masked path range at index %ld differ: %@ vs %@", (long)i, range1, range2);
+            return NO;
+        }
+    }
+    RCTLogInfo(@"[RNPencilKit] Masked path ranges are equal.");
+    
+    // Note: We intentionally ignore the transform because we apply it separately for multi-device support.
+    RCTLogInfo(@"[RNPencilKit] Ignoring transform in comparison.");
+    
+    // If all checks pass, we consider the strokes equal.
+    RCTLogInfo(@"[RNPencilKit] Strokes are considered equal by custom matching.");
+    return YES;
+}
+
+
+- (void)applyStrokeDiffWithAddedStrokes:(NSArray<NSString *> *)addedStrokesBase64
+                         removedStrokes:(NSArray<NSString *> *)removedStrokesBase64 {
+    // 1. Remove strokes from current drawing
+    NSMutableArray<PKStroke *> *currentStrokes = [NSMutableArray arrayWithArray:_view.drawing.strokes];
+    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Initial current strokes count: %lu", (unsigned long)currentStrokes.count);
+    
+    BOOL allRemovalsSuccessful = YES;
+    
+    for (NSString *removedStrokeBase64 in removedStrokesBase64) {
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing removed stroke base64: %@", removedStrokeBase64);
+        
+        NSData *data = [[NSData alloc] initWithBase64EncodedString:removedStrokeBase64
+                                                           options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        if (!data) {
+            RCTLogError(@"[RNPencilKit] applyStrokeDiff: Failed to decode base64 for removed stroke.");
+            allRemovalsSuccessful = NO;
+            continue;
+        }
+        
+        NSError *error = nil;
+        PKDrawing *incomingDrawing = [[PKDrawing alloc] initWithData:data error:&error];
+        if (error || !incomingDrawing || incomingDrawing.strokes.count == 0) {
+            RCTLogError(@"[RNPencilKit] applyStrokeDiff: Invalid removed stroke data.");
+            allRemovalsSuccessful = NO;
+            continue;
+        }
+        
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Incoming drawing contains %lu stroke(s)", (unsigned long)incomingDrawing.strokes.count);
+        
+        // For each stroke in the removed drawing, try to find a matching stroke in currentStrokes.
+        for (PKStroke *strokeToRemove in incomingDrawing.strokes) {
+            RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Stroke to remove details: %@", [self loggableDescriptionForStroke:strokeToRemove]);
+            
+            // Detailed logging for the removed stroke.
+            RCTLogInfo(@"[RNPencilKit] Detailed removed stroke info: Ink: %@, Transform: %@, RenderBounds: %@, RandomSeed: %u, Mask: %@, MaskedPathRanges: %@, Path: %@, Point Count: %lu",
+                       strokeToRemove.ink,
+                       NSStringFromCGAffineTransform(strokeToRemove.transform),
+                       NSStringFromCGRect(strokeToRemove.renderBounds),
+                       strokeToRemove.randomSeed,
+                       strokeToRemove.mask,
+                       strokeToRemove.maskedPathRanges,
+                       strokeToRemove.path,
+                       (unsigned long)strokeToRemove.path.count);
+            
+            BOOL foundAndRemoved = NO;
+            for (PKStroke *existingStroke in [currentStrokes copy]) {
+                RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Existing stroke details: %@", [self loggableDescriptionForStroke:existingStroke]);
+                
+                // Detailed logging for the existing stroke.
+                RCTLogInfo(@"[RNPencilKit] Detailed existing stroke info: Ink: %@, Transform: %@, RenderBounds: %@, RandomSeed: %u, Mask: %@, MaskedPathRanges: %@, Path: %@, Point Count: %lu",
+                           existingStroke.ink,
+                           NSStringFromCGAffineTransform(existingStroke.transform),
+                           NSStringFromCGRect(existingStroke.renderBounds),
+                           existingStroke.randomSeed,
+                           existingStroke.mask,
+                           existingStroke.maskedPathRanges,
+                           existingStroke.path,
+                           (unsigned long)existingStroke.path.count);
+                
+                if ([self stroke:existingStroke isEqualToStroke:strokeToRemove]) {
+                    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Custom match found. Removing stroke.");
+                    [currentStrokes removeObject:existingStroke];
+                    foundAndRemoved = YES;
+                    break;
+                }
+            }
+            if (!foundAndRemoved) {
+                RCTLogWarn(@"[RNPencilKit] applyStrokeDiff: Removed stroke not found in current drawing.");
+                allRemovalsSuccessful = NO;
+            }
+        }
+    }
+    
+    if (!allRemovalsSuccessful) {
+        RCTLogWarn(@"[RNPencilKit] applyStrokeDiff: Not all removals were successful. Aborting diff application.");
+        return;
+    }
+    
+    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Strokes count after removal: %lu", (unsigned long)currentStrokes.count);
+    PKDrawing *drawingAfterRemoval = [[PKDrawing alloc] initWithStrokes:currentStrokes];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_view setDrawing:drawingAfterRemoval];
+        [_view.undoManager removeAllActions];
+        _previousDrawing = drawingAfterRemoval;
+    });
+    
+    // 2. Process added strokes only if removals were all successful.
+    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing %lu added stroke(s)", (unsigned long)addedStrokesBase64.count);
+    for (NSString *addedStrokeBase64 in addedStrokesBase64) {
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing added stroke base64: %@", addedStrokeBase64);
+        BOOL success = [self loadBase64Stroke:addedStrokeBase64];
+        if (!success) {
+            RCTLogError(@"[RNPencilKit] applyStrokeDiff: Failed to load added stroke.");
+        }
+    }
+}
+
+
 @end
 
 #pragma mark - PKCanvasViewDelegate
@@ -779,7 +889,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
 @implementation RNPencilKit (ReactNative)
 
 - (void)handleCommand:(const NSString *)commandName args:(const NSArray *)args {
-    
+
     if ([commandName isEqualToString:@"loadStroke"]) {
       if (args.count == 1 && [args[0] isKindOfClass:[NSString class]]) {
         NSString *strokeBase64 = args[0];
@@ -788,6 +898,16 @@ getEmitter(const SharedViewEventEmitter emitter) {
       }
     }
     
+    if ([commandName isEqualToString:@"applyStrokeDiff"]) {
+      if (args.count == 2 &&
+          [args[0] isKindOfClass:[NSArray class]] &&
+          [args[1] isKindOfClass:[NSArray class]]) {
+        NSArray<NSString *> *addedStrokes = args[0];
+        NSArray<NSString *> *removedStrokes = args[1];
+        [self applyStrokeDiffWithAddedStrokes:addedStrokes removedStrokes:removedStrokes];
+        return;
+      }
+    }
     
   RCTRNPencilKitHandleCommand(self, commandName, args);
 }
@@ -801,40 +921,3 @@ Class<RCTComponentViewProtocol> RNPencilKitCls(void) {
 }
 
 @end
-
-//#pragma mark - ImageURL Custom Prop
-//@implementation RNPencilKit (BackgroundImageProp)
-//
-//RCT_CUSTOM_VIEW_PROPERTY(imageURL, NSString, RNPencilKit)
-//{
-//    RCTLogInfo(@"[RNPencilKit] Received imageURL:");
-//
-//  RNPencilKit *pencilKitView = (RNPencilKit *)view;
-//  RCTLogInfo(@"[RNPencilKit] Received imageURL: %@", json);
-//
-//
-//  if ([json isKindOfClass:[NSString class]] && [(NSString *)json length] > 0) {
-//    NSString *urlString = (NSString *)json;
-//    NSURL *url = [NSURL URLWithString:urlString];
-//
-//    if (url) {
-//      NSError *error = nil;
-//      NSData *imgData = [NSData dataWithContentsOfURL:url options:0 error:&error];
-//
-//      if (!error && imgData) {
-//        UIImage *loadedImage = [UIImage imageWithData:imgData];
-//        if (loadedImage) {
-//            RCTLogInfo(@"[RNPencilKit] Received imageURL");
-//
-//          pencilKitView->_backgroundImageView.image = loadedImage;
-//          return;
-//        }
-//      }
-//    }
-//  }
-//  UIImage *whiteImage = [RNPencilKit imageWithColor:[UIColor whiteColor]
-//                                               size:pencilKitView->_backgroundImageView.bounds.size];
-//  pencilKitView->_backgroundImageView.image = whiteImage;
-//}
-//
-//@end
