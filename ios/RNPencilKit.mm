@@ -150,9 +150,6 @@ getEmitter(const SharedViewEventEmitter emitter) {
   return self;
 }
 
-
-
-
 - (void)dealloc {
   [_toolPicker removeObserver:_view];
   [_toolPicker removeObserver:self];
@@ -173,7 +170,6 @@ getEmitter(const SharedViewEventEmitter emitter) {
   if (prev->alwaysBounceHorizontal ^ next->alwaysBounceHorizontal) {
     _view.alwaysBounceHorizontal = next->alwaysBounceHorizontal;
   }
-
 
     // IMAGE URL LOADING - FIXED
     if (prev->imageURL != next->imageURL) {
@@ -257,11 +253,6 @@ getEmitter(const SharedViewEventEmitter emitter) {
         }
     }
 
-
-
-
-
-
   // drawingPolicy
   if (prev->drawingPolicy != next->drawingPolicy) {
     _view.drawingPolicy =
@@ -291,12 +282,6 @@ getEmitter(const SharedViewEventEmitter emitter) {
     [_view setBackgroundColor:intToColor(next->backgroundColor)];
   }
 
-  // -----------------------------------------------------------------------
-  // NOTE: We removed the direct 'imageURL' usage from here because RNPencilKitProps
-  // does not define it. We'll rely on the RCT_CUSTOM_VIEW_PROPERTY below.
-  // -----------------------------------------------------------------------
-
-  // Finally, store the new props and call super
   _props = next; // properly cast above
   [super updateProps:props oldProps:oldProps];
 }
@@ -305,7 +290,7 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
 - (void)clear {
   [_view setDrawing:[[PKDrawing alloc] init]];
-  [_view.undoManager removeAllActions];
+ // [_view.undoManager removeAllActions];
     _previousDrawing = _view.drawing; // FIX: update previous drawing
 }
 
@@ -327,7 +312,43 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 - (NSString *)getBase64Data {
-  return [_view.drawing.dataRepresentation base64EncodedStringWithOptions:0];
+  RCTLogInfo(@"[RNPencilKit] getBase64Data: Converting from device→doc before returning base64.");
+
+  // 1) Grab the current device-based drawing
+  PKDrawing *deviceDrawing = _view.drawing;
+  if (!deviceDrawing) {
+    return nil;
+  }
+
+  // 2) Build the doc→device transform, then invert to get device→doc
+  CGSize viewSize = _view.bounds.size;
+
+  // Compute the doc→device transform:
+  CGFloat hRatio = viewSize.width  / kDocWidth;
+  CGFloat vRatio = viewSize.height / kDocHeight;
+  CGFloat scale  = MIN(hRatio, vRatio);
+
+  // Centering offsets
+  CGFloat scaledW = kDocWidth  * scale;
+  CGFloat scaledH = kDocHeight * scale;
+  CGFloat offsetX = (viewSize.width  - scaledW) / 2.0;
+  CGFloat offsetY = (viewSize.height - scaledH) / 2.0;
+
+  CGAffineTransform docToDevice = CGAffineTransformMakeTranslation(offsetX, offsetY);
+  docToDevice = CGAffineTransformScale(docToDevice, scale, scale);
+
+  // Invert it to get device→doc
+  CGAffineTransform deviceToDoc = CGAffineTransformInvert(docToDevice);
+
+  // 3) Convert the drawing to doc coords
+  PKDrawing *docDrawing = [deviceDrawing drawingByApplyingTransform:deviceToDoc];
+  CGRect docBounds = docDrawing.bounds;
+  RCTLogInfo(@"[RNPencilKit] getBase64Data: docDrawing bounds = %@ (in doc coords)",
+             NSStringFromCGRect(docBounds));
+
+  // 4) Return base64 of the doc coords
+  NSData *data = [docDrawing dataRepresentation];
+  return [data base64EncodedStringWithOptions:0];
 }
 
 - (NSString *)getBase64PngData:(double)scale {
@@ -376,64 +397,12 @@ getEmitter(const SharedViewEventEmitter emitter) {
   return [self loadWithData:data];
 }
 
-- (BOOL)loadBase64Data:(NSString *)base64 {
-  // Mark the update as programmatic.
-  self.isProgrammaticUpdate = YES;
-  
-  NSData *data = [[NSData alloc] initWithBase64EncodedString:base64
-                                                     options:NSDataBase64DecodingIgnoreUnknownCharacters];
-  if (!data) {
-    self.isProgrammaticUpdate = NO;
-    return NO;
-  }
-  
-  NSError *error = nil;
-  PKDrawing *drawing = [[PKDrawing alloc] initWithData:data error:&error];
-  if (error || !drawing) {
-    self.isProgrammaticUpdate = NO;
-    return NO;
-  }
-  
-  // Scale if the drawing is larger than the canvas.
-  CGRect drawingBounds = drawing.bounds;
-  if (!CGRectIsEmpty(drawingBounds)) {
-    CGSize targetSize = _view.bounds.size;
-    if (targetSize.width > 0 && targetSize.height > 0) {
-      BOOL alreadyScaled = (CGRectGetWidth(drawingBounds) <= targetSize.width &&
-                            CGRectGetHeight(drawingBounds) <= targetSize.height);
-      if (!alreadyScaled) {
-        CGFloat scaleX = targetSize.width / CGRectGetWidth(drawingBounds);
-        CGFloat scaleY = targetSize.height / CGRectGetHeight(drawingBounds);
-        CGFloat scale = MIN(scaleX, scaleY);
-  
-        CGFloat offsetX = (targetSize.width - (drawingBounds.size.width * scale)) / 2
-                          - (drawingBounds.origin.x * scale);
-        CGFloat offsetY = (targetSize.height - (drawingBounds.size.height * scale)) / 2
-                          - (drawingBounds.origin.y * scale);
-  
-        CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-        transform = CGAffineTransformTranslate(transform, offsetX / scale, offsetY / scale);
-  
-        PKDrawing *transformedDrawing = [drawing drawingByApplyingTransform:transform];
-        drawing = transformedDrawing;
-      }
-    }
-  }
-  
-  // Update the drawing on the main thread as an atomic update:
-  dispatch_async(dispatch_get_main_queue(), ^{
-    // First, clear everything.
-    [_view setDrawing:[[PKDrawing alloc] init]];
-    [_view.undoManager removeAllActions];
-    // Then, set the new drawing from the Base64 data.
-    [_view setDrawing:drawing];
-    [_view.undoManager removeAllActions];
-    _previousDrawing = _view.drawing;
-    self.isProgrammaticUpdate = NO;
-  });
-  
-  return YES;
-}
+
+
+
+
+
+
 
 
 - (BOOL)loadWithData:(NSData *)data {
@@ -567,82 +536,172 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 
-#pragma mark - Loading a single stroke from base64
+#pragma mark - Document ↔ Device Transform Helpers
 
-/**
- * Example: load a single stroke (in base64 PKDrawing data) and merge it.
- * We apply the same "scale to fit canvas" logic as loadBase64Data: does,
- * but just for this stroke. Then we append it to the existing drawing.
- */
-- (BOOL)loadBase64Stroke:(NSString *)base64 {
-    
-    self.isProgrammaticUpdate = YES;
+static const CGFloat kDocWidth  = 1131.0;
+static const CGFloat kDocHeight = 1600.0;
 
-    
-    RCTLogInfo(@"[RNPencilKit loadBase64StrokeCalled to add ");
-  // 1) Decode base64 -> PKDrawing
+// Returns the transform that converts coordinates from document space (1131×1600)
+// to device (canvas) space. This does an aspect-fit of the document into _view.bounds.
+- (CGAffineTransform)documentToDeviceTransform {
+  CGSize docSize = CGSizeMake(kDocWidth, kDocHeight);
+  CGSize viewSize = _view.bounds.size;
+  
+  // Calculate aspect-fit scale factors.
+  CGFloat hRatio = viewSize.width / docSize.width;
+  CGFloat vRatio = viewSize.height / docSize.height;
+  CGFloat scale  = MIN(hRatio, vRatio);
+  
+  // Center the document in the canvas.
+  CGFloat scaledWidth  = docSize.width * scale;
+  CGFloat scaledHeight = docSize.height * scale;
+  CGFloat offsetX = (viewSize.width - scaledWidth) / 2.0;
+  CGFloat offsetY = (viewSize.height - scaledHeight) / 2.0;
+  
+  // Build the transform: first translate, then scale.
+  CGAffineTransform t = CGAffineTransformMakeTranslation(offsetX, offsetY);
+  t = CGAffineTransformScale(t, scale, scale);
+  
+  RCTLogInfo(@"[RNPencilKit] documentToDeviceTransform: scale = %f, offsetX = %f, offsetY = %f", scale, offsetX, offsetY);
+  return t;
+}
+
+// Returns the inverse transform: device → document coordinates.
+- (CGAffineTransform)deviceToDocumentTransform {
+  CGAffineTransform forward = [self documentToDeviceTransform];
+  CGAffineTransform inverse = CGAffineTransformInvert(forward);
+  RCTLogInfo(@"[RNPencilKit] deviceToDocumentTransform: computed inverse transform");
+  return inverse;
+}
+
+// Convenience method to apply a given CGAffineTransform to a PKDrawing.
+- (PKDrawing *)applyTransform:(CGAffineTransform)transform toDrawing:(PKDrawing *)drawing {
+  if (!drawing) return nil;
+  return [drawing drawingByApplyingTransform:transform];
+}
+
+#pragma mark - Loading Full Drawing (loadBase64Data:)
+
+- (BOOL)loadBase64Data:(NSString *)base64 {
+  RCTLogInfo(@"[RNPencilKit] loadBase64Data: Called. Interpreting base64 as doc coords.");
+  self.isProgrammaticUpdate = YES;
+
+  // 1) Decode
   NSData *data = [[NSData alloc] initWithBase64EncodedString:base64
                                                      options:NSDataBase64DecodingIgnoreUnknownCharacters];
   if (!data) {
-      self.isProgrammaticUpdate = NO;
-    RCTLogError(@"[RNPencilKit] loadBase64Stroke: Could not decode base64 data!");
+    RCTLogError(@"[RNPencilKit] loadBase64Data: Could not decode base64 data!");
+    self.isProgrammaticUpdate = NO;
     return NO;
   }
 
+  // 2) Initialize doc-based PKDrawing
   NSError *error = nil;
-  PKDrawing *incomingDrawing = [[PKDrawing alloc] initWithData:data error:&error];
-  if (error || !incomingDrawing || incomingDrawing.strokes.count == 0) {
-      self.isProgrammaticUpdate = NO;
-    RCTLogError(@"[RNPencilKit] loadBase64Stroke: No valid stroke in base64 data!");
+  PKDrawing *docDrawing = [[PKDrawing alloc] initWithData:data error:&error];
+  if (error || !docDrawing) {
+    RCTLogError(@"[RNPencilKit] loadBase64Data: Could not init PKDrawing from data. Error: %@", error);
+    self.isProgrammaticUpdate = NO;
     return NO;
   }
 
-  // If there's more than one stroke, you can decide if you want them all:
-  // For instance, you could just keep the "first" stroke:
-  // PKStroke *firstStroke = incomingDrawing.strokes.firstObject;
-  // PKDrawing *singleStrokeDrawing = [[PKDrawing alloc] initWithStrokes:@[firstStroke]];
+  RCTLogInfo(@"[RNPencilKit] loadBase64Data: docDrawing bounds (doc coords) = %@",
+             NSStringFromCGRect(docDrawing.bounds));
 
-  // Or keep them all. We'll keep them all for demonstration:
-  PKDrawing *singleStrokeDrawing = incomingDrawing;
+  // 3) Build doc→device transform
+  CGSize viewSize = _view.bounds.size;
+  CGFloat hRatio = viewSize.width  / kDocWidth;
+  CGFloat vRatio = viewSize.height / kDocHeight;
+  CGFloat scale  = MIN(hRatio, vRatio);
 
-  // 2) Scale/translate so it fits the *current* canvas size (like loadBase64Data:)
-  CGRect strokeBounds = singleStrokeDrawing.bounds;
-  if (!CGRectIsEmpty(strokeBounds)) {
-    CGSize targetSize = _view.bounds.size;
-    if (targetSize.width > 0 && targetSize.height > 0) {
-      BOOL alreadyFits =
-        (CGRectGetWidth(strokeBounds) <= targetSize.width &&
-         CGRectGetHeight(strokeBounds) <= targetSize.height);
+  CGFloat scaledW = kDocWidth  * scale;
+  CGFloat scaledH = kDocHeight * scale;
+  CGFloat offsetX = (viewSize.width  - scaledW) / 2.0;
+  CGFloat offsetY = (viewSize.height - scaledH) / 2.0;
 
-      if (!alreadyFits) {
-        CGFloat scaleX = targetSize.width / CGRectGetWidth(strokeBounds);
-        CGFloat scaleY = targetSize.height / CGRectGetHeight(strokeBounds);
-        CGFloat scale = MIN(scaleX, scaleY);
+  CGAffineTransform docToDevice = CGAffineTransformMakeTranslation(offsetX, offsetY);
+  docToDevice = CGAffineTransformScale(docToDevice, scale, scale);
 
-        CGFloat offsetX = (targetSize.width - (strokeBounds.size.width * scale)) / 2
-                          - (strokeBounds.origin.x * scale);
-        CGFloat offsetY = (targetSize.height - (strokeBounds.size.height * scale)) / 2
-                          - (strokeBounds.origin.y * scale);
+  // 4) Transform docDrawing → device coords
+  PKDrawing *deviceDrawing = [docDrawing drawingByApplyingTransform:docToDevice];
+  RCTLogInfo(@"[RNPencilKit] loadBase64Data: deviceDrawing bounds = %@",
+             NSStringFromCGRect(deviceDrawing.bounds));
 
-        CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-        transform = CGAffineTransformTranslate(transform, offsetX / scale, offsetY / scale);
-        singleStrokeDrawing = [singleStrokeDrawing drawingByApplyingTransform:transform];
-      }
-    }
-  }
+  // 5) Apply on the main thread
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [_view setDrawing:deviceDrawing];
+    [_view.undoManager removeAllActions];
+    _previousDrawing = deviceDrawing;
 
-  // 3) Merge that stroke(s) with the existing drawing:
-  PKDrawing *current = _view.drawing;
-  PKDrawing *merged = [current drawingByAppendingDrawing:singleStrokeDrawing];
-
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-           [_view setDrawing:merged];
-           self.isProgrammaticUpdate = NO;
-       });
+    RCTLogInfo(@"[RNPencilKit] loadBase64Data: Successfully applied drawing.");
+    self.isProgrammaticUpdate = NO;
+  });
 
   return YES;
 }
+
+
+#pragma mark - Loading a Single Stroke (loadBase64Stroke:)
+
+- (BOOL)loadBase64Stroke:(NSString *)base64 {
+  RCTLogInfo(@"[RNPencilKit] loadBase64Stroke: Called. Interpreting base64 as doc coords.");
+  self.isProgrammaticUpdate = YES;
+
+  // 1) Decode
+  NSData *data = [[NSData alloc] initWithBase64EncodedString:base64
+                                                     options:NSDataBase64DecodingIgnoreUnknownCharacters];
+  if (!data) {
+    RCTLogError(@"[RNPencilKit] loadBase64Stroke: Failed to decode base64 data!");
+    self.isProgrammaticUpdate = NO;
+    return NO;
+  }
+
+  // 2) Build a doc-based PKDrawing
+  NSError *error = nil;
+  PKDrawing *docDrawing = [[PKDrawing alloc] initWithData:data error:&error];
+  if (error || !docDrawing || docDrawing.strokes.count == 0) {
+    RCTLogError(@"[RNPencilKit] loadBase64Stroke: No valid stroke in base64 data!");
+    self.isProgrammaticUpdate = NO;
+    return NO;
+  }
+
+  RCTLogInfo(@"[RNPencilKit] loadBase64Stroke: docDrawing bounds (doc coords) = %@",
+             NSStringFromCGRect(docDrawing.bounds));
+
+  // 3) doc→device
+  CGSize viewSize = _view.bounds.size;
+  CGFloat hRatio = viewSize.width  / kDocWidth;
+  CGFloat vRatio = viewSize.height / kDocHeight;
+  CGFloat scale  = MIN(hRatio, vRatio);
+
+  CGFloat scaledW = kDocWidth  * scale;
+  CGFloat scaledH = kDocHeight * scale;
+  CGFloat offsetX = (viewSize.width  - scaledW) / 2.0;
+  CGFloat offsetY = (viewSize.height - scaledH) / 2.0;
+
+  CGAffineTransform docToDevice = CGAffineTransformMakeTranslation(offsetX, offsetY);
+  docToDevice = CGAffineTransformScale(docToDevice, scale, scale);
+
+  PKDrawing *deviceStrokeDrawing = [docDrawing drawingByApplyingTransform:docToDevice];
+  RCTLogInfo(@"[RNPencilKit] loadBase64Stroke: deviceStroke bounds = %@",
+             NSStringFromCGRect(deviceStrokeDrawing.bounds));
+
+  // 4) Merge with current drawing
+  PKDrawing *currentDrawing = _view.drawing;
+  PKDrawing *merged = [currentDrawing drawingByAppendingDrawing:deviceStrokeDrawing];
+
+  // 5) Update
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [_view setDrawing:merged];
+  //  [_view.undoManager removeAllActions];
+    _previousDrawing = merged;
+
+    RCTLogInfo(@"[RNPencilKit] loadBase64Stroke: Stroke successfully applied.");
+    self.isProgrammaticUpdate = NO;
+  });
+
+  return YES;
+}
+
 
 
 // Helper method to create a string representation for a stroke.
@@ -658,11 +717,38 @@ getEmitter(const SharedViewEventEmitter emitter) {
 - (BOOL)stroke:(PKStroke *)stroke1 isEqualToStroke:(PKStroke *)stroke2 {
     RCTLogInfo(@"[RNPencilKit] Comparing strokes using custom function.");
     
-    // Compare ink properties.
-    if (![stroke1.ink isEqual:stroke2.ink]) {
-        RCTLogInfo(@"[RNPencilKit] Inks differ: %@ vs %@", stroke1.ink, stroke2.ink);
+    PKInk *ink1 = stroke1.ink;
+       PKInk *ink2 = stroke2.ink;
+    
+    // Log ink details for debugging
+    RCTLogInfo(@"[RNPencilKit] Ink1: type=%@, color=%@", ink1.inkType, ink1.color);
+    RCTLogInfo(@"[RNPencilKit] Ink2: type=%@, color=%@", ink2.inkType, ink2.color);
+    
+    // 2) Compare inkType first (pen vs pencil vs marker)
+    if (![ink1.inkType isEqualToString:ink2.inkType]) {
+        RCTLogInfo(@"[RNPencilKit] Ink types differ: %@ vs %@", ink1.inkType, ink2.inkType);
         return NO;
     }
+    
+    // 3) Compare color components with tolerance
+    CGFloat r1, g1, b1, a1;
+    CGFloat r2, g2, b2, a2;
+    [ink1.color getRed:&r1 green:&g1 blue:&b1 alpha:&a1];
+    [ink2.color getRed:&r2 green:&g2 blue:&b2 alpha:&a2];
+    
+    RCTLogInfo(@"[RNPencilKit] Ink1 RGBA=(%.3f, %.3f, %.3f, %.3f), Ink2 RGBA=(%.3f, %.3f, %.3f, %.3f)",
+               r1, g1, b1, a1, r2, g2, b2, a2);
+    
+    static CGFloat colorTolerance = 0.002; // Allow small floating-point differences
+    if (fabs(r1 - r2) > colorTolerance ||
+        fabs(g1 - g2) > colorTolerance ||
+        fabs(b1 - b2) > colorTolerance ||
+        fabs(a1 - a2) > colorTolerance) {
+        RCTLogInfo(@"[RNPencilKit] Ink colors differ beyond tolerance.");
+        return NO;
+    }
+    
+    
     RCTLogInfo(@"[RNPencilKit] Inks are equal.");
     
     // Compare paths by count (you could extend this to compare each control point with tolerance).
@@ -712,20 +798,16 @@ getEmitter(const SharedViewEventEmitter emitter) {
 
 
 - (void)applyStrokeDiffWithAddedStrokes:(NSArray<NSString *> *)addedStrokesBase64
-                         removedStrokes:(NSArray<NSString *> *)removedStrokesBase64 {
-
-    // Mark the entire diff as a programmatic update.
+                         removedStrokes:(NSArray<NSString *> *)removedStrokesBase64
+{
     self.isProgrammaticUpdate = YES;
-    
-    // 1. Start with current strokes.
-    NSMutableArray<PKStroke *> *currentStrokes = [NSMutableArray arrayWithArray:_view.drawing.strokes];
-    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Initial current strokes count: %lu", (unsigned long)currentStrokes.count);
-    
+        PKDrawing *existingDrawing = _view.drawing;
+    NSMutableArray<PKStroke *> *currentStrokes = [NSMutableArray arrayWithArray:existingDrawing.strokes];
+    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Initial current strokes count: %lu",
+               (unsigned long)currentStrokes.count);
     BOOL allRemovalsSuccessful = YES;
-    
-    // 2. Process removals.
     for (NSString *removedStrokeBase64 in removedStrokesBase64) {
-        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing removed stroke base64: %@", removedStrokeBase64);
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Removing stroke base64: %@", removedStrokeBase64);
         
         NSData *data = [[NSData alloc] initWithBase64EncodedString:removedStrokeBase64
                                                            options:NSDataBase64DecodingIgnoreUnknownCharacters];
@@ -742,37 +824,13 @@ getEmitter(const SharedViewEventEmitter emitter) {
             allRemovalsSuccessful = NO;
             continue;
         }
-        
-        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Incoming drawing contains %lu stroke(s)", (unsigned long)incomingDrawing.strokes.count);
-        
-        // For each stroke in the incoming (removed) drawing, find a matching stroke in currentStrokes.
-        for (PKStroke *strokeToRemove in incomingDrawing.strokes) {
-            RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Stroke to remove details: %@", [self loggableDescriptionForStroke:strokeToRemove]);
-            RCTLogInfo(@"[RNPencilKit] Detailed removed stroke info: Ink: %@, Transform: %@, RenderBounds: %@, RandomSeed: %u, Mask: %@, MaskedPathRanges: %@, Path: %@, Point Count: %lu",
-                       strokeToRemove.ink,
-                       NSStringFromCGAffineTransform(strokeToRemove.transform),
-                       NSStringFromCGRect(strokeToRemove.renderBounds),
-                       strokeToRemove.randomSeed,
-                       strokeToRemove.mask,
-                       strokeToRemove.maskedPathRanges,
-                       strokeToRemove.path,
-                       (unsigned long)strokeToRemove.path.count);
-            
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: The removed drawing has %lu stroke(s)",
+                   (unsigned long)incomingDrawing.strokes.count);
+                for (PKStroke *strokeToRemove in incomingDrawing.strokes) {
             BOOL foundAndRemoved = NO;
             for (PKStroke *existingStroke in [currentStrokes copy]) {
-                RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Existing stroke details: %@", [self loggableDescriptionForStroke:existingStroke]);
-                RCTLogInfo(@"[RNPencilKit] Detailed existing stroke info: Ink: %@, Transform: %@, RenderBounds: %@, RandomSeed: %u, Mask: %@, MaskedPathRanges: %@, Path: %@, Point Count: %lu",
-                           existingStroke.ink,
-                           NSStringFromCGAffineTransform(existingStroke.transform),
-                           NSStringFromCGRect(existingStroke.renderBounds),
-                           existingStroke.randomSeed,
-                           existingStroke.mask,
-                           existingStroke.maskedPathRanges,
-                           existingStroke.path,
-                           (unsigned long)existingStroke.path.count);
-                
                 if ([self stroke:existingStroke isEqualToStroke:strokeToRemove]) {
-                    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Custom match found. Removing stroke.");
+                    RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Matched & removing stroke.");
                     [currentStrokes removeObject:existingStroke];
                     foundAndRemoved = YES;
                     break;
@@ -784,20 +842,26 @@ getEmitter(const SharedViewEventEmitter emitter) {
             }
         }
     }
-    
-    // Abort if any removal failed.
-    if (!allRemovalsSuccessful) {
-        RCTLogWarn(@"[RNPencilKit] applyStrokeDiff: Not all removals were successful. Aborting diff application.");
+        if (!allRemovalsSuccessful) {
+        RCTLogWarn(@"[RNPencilKit] applyStrokeDiff: Not all removals were successful. Aborting.");
         self.isProgrammaticUpdate = NO;
         return;
     }
+    CGSize viewSize = _view.bounds.size;
+    CGFloat hRatio = viewSize.width  / kDocWidth;   // e.g. 351 / 1131
+    CGFloat vRatio = viewSize.height / kDocHeight;  // e.g. 497 / 1600
+    CGFloat scale  = MIN(hRatio, vRatio);
     
-    // 3. Process additions.
-    // Start with a mutable array that includes the current strokes after removals.
-    NSMutableArray<PKStroke *> *finalStrokes = [NSMutableArray arrayWithArray:currentStrokes];
+    CGFloat scaledW = kDocWidth  * scale;
+    CGFloat scaledH = kDocHeight * scale;
+    CGFloat offsetX = (viewSize.width  - scaledW) / 2.0;
+    CGFloat offsetY = (viewSize.height - scaledH) / 2.0;
+    
+    CGAffineTransform docToDevice = CGAffineTransformMakeTranslation(offsetX, offsetY);
+    docToDevice = CGAffineTransformScale(docToDevice, scale, scale);
     
     for (NSString *addedStrokeBase64 in addedStrokesBase64) {
-        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Processing added stroke base64: %@", addedStrokeBase64);
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Adding stroke base64: %@", addedStrokeBase64);
         
         NSData *data = [[NSData alloc] initWithBase64EncodedString:addedStrokeBase64
                                                            options:NSDataBase64DecodingIgnoreUnknownCharacters];
@@ -807,59 +871,31 @@ getEmitter(const SharedViewEventEmitter emitter) {
         }
         
         NSError *error = nil;
-        PKDrawing *incomingDrawing = [[PKDrawing alloc] initWithData:data error:&error];
-        if (error || !incomingDrawing || incomingDrawing.strokes.count == 0) {
+        PKDrawing *docDrawing = [[PKDrawing alloc] initWithData:data error:&error];
+        if (error || !docDrawing || docDrawing.strokes.count == 0) {
             RCTLogError(@"[RNPencilKit] applyStrokeDiff: Invalid added stroke data.");
             continue;
         }
         
-        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Incoming added drawing contains %lu stroke(s)", (unsigned long)incomingDrawing.strokes.count);
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: The added drawing has %lu stroke(s)",
+                   (unsigned long)docDrawing.strokes.count);
+                PKDrawing *deviceDrawing = [docDrawing drawingByApplyingTransform:docToDevice];
         
-        // Process each added stroke: scale/translate if needed, then add its strokes.
-        for (PKStroke *strokeToAdd in incomingDrawing.strokes) {
-            RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Stroke to add details: %@", [self loggableDescriptionForStroke:strokeToAdd]);
-            
-            // Create a temporary drawing for scaling.
-            PKDrawing *tempDrawing = [[PKDrawing alloc] initWithStrokes:@[ strokeToAdd ]];
-            CGRect strokeBounds = tempDrawing.bounds;
-            if (!CGRectIsEmpty(strokeBounds)) {
-                CGSize targetSize = _view.bounds.size;
-                if (targetSize.width > 0 && targetSize.height > 0) {
-                    BOOL alreadyFits = (CGRectGetWidth(strokeBounds) <= targetSize.width &&
-                                        CGRectGetHeight(strokeBounds) <= targetSize.height);
-                    if (!alreadyFits) {
-                        CGFloat scaleX = targetSize.width / CGRectGetWidth(strokeBounds);
-                        CGFloat scaleY = targetSize.height / CGRectGetHeight(strokeBounds);
-                        CGFloat scale = MIN(scaleX, scaleY);
-                        
-                        CGFloat offsetX = (targetSize.width - (strokeBounds.size.width * scale)) / 2
-                                          - (strokeBounds.origin.x * scale);
-                        CGFloat offsetY = (targetSize.height - (strokeBounds.size.height * scale)) / 2
-                                          - (strokeBounds.origin.y * scale);
-                        
-                        CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-                        transform = CGAffineTransformTranslate(transform, offsetX / scale, offsetY / scale);
-                        tempDrawing = [tempDrawing drawingByApplyingTransform:transform];
-                    }
-                }
-            }
-            // Add the strokes from the (possibly scaled) drawing.
-            [finalStrokes addObjectsFromArray:tempDrawing.strokes];
-        }
+        // 3) Append these new strokes to our in-memory stroke list
+        [currentStrokes addObjectsFromArray:deviceDrawing.strokes];
     }
-    
-    // 4. Create a final drawing from all strokes.
-    PKDrawing *finalDrawing = [[PKDrawing alloc] initWithStrokes:finalStrokes];
-    
-    // 5. Update the drawing on the main thread in one atomic update.
+
+    PKDrawing *finalDrawing = [[PKDrawing alloc] initWithStrokes:currentStrokes];
+
     dispatch_async(dispatch_get_main_queue(), ^{
         [_view setDrawing:finalDrawing];
-        [_view.undoManager removeAllActions];
+     //   [_view.undoManager removeAllActions];
         _previousDrawing = finalDrawing;
         self.isProgrammaticUpdate = NO;
+        RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Finished. Final stroke count: %lu",
+                   (unsigned long)finalDrawing.strokes.count);
     });
 }
-
 
 
 @end
@@ -875,59 +911,84 @@ getEmitter(const SharedViewEventEmitter emitter) {
 }
 
 - (void)canvasViewDrawingDidChange:(PKCanvasView *)canvasView {
-    
-    if (self.isProgrammaticUpdate) {
+
+  // 1) Prevent re-entrancy for programmatic updates
+  if (self.isProgrammaticUpdate) {
     _previousDrawing = canvasView.drawing;
-      return;
-    }
-    
+    return;
+  }
+
+  // 2) If we have an event emitter, proceed
   if (auto e = getEmitter(_eventEmitter)) {
-    // 1) Convert old and new strokes to arrays
+
+    // A) Identify the old vs. new strokes
     NSArray<PKStroke *> *oldStrokes = _previousDrawing.strokes;
     NSArray<PKStroke *> *currentStrokes = canvasView.drawing.strokes;
 
-    // 2) Convert arrays to sets for easy diffing
     NSSet *oldSet = [NSSet setWithArray:oldStrokes];
     NSSet *newSet = [NSSet setWithArray:currentStrokes];
 
-    // 3) Find removed vs. added
     NSMutableSet *removedSet = [oldSet mutableCopy];
-    [removedSet minusSet:newSet]; // everything that was in old but NOT in new
-
+    [removedSet minusSet:newSet]; // Strokes that were in old but not in new
     NSMutableSet *addedSet = [newSet mutableCopy];
-    [addedSet minusSet:oldSet];   // everything new that WASN'T in old
+    [addedSet minusSet:oldSet];   // Strokes that are new in current
 
-    // 4) Build vectors of base64-encoded strokes
+    // B) Build the device→doc transform
+    // First compute doc→device (aspect-fit)
+    CGSize viewSize = _view.bounds.size;
+    CGFloat hRatio = viewSize.width  / kDocWidth;   // e.g.  351 / 1131
+    CGFloat vRatio = viewSize.height / kDocHeight;  // e.g.  497 / 1600
+    CGFloat scale  = MIN(hRatio, vRatio);
+
+    CGFloat scaledW = kDocWidth  * scale;
+    CGFloat scaledH = kDocHeight * scale;
+    CGFloat offsetX = (viewSize.width  - scaledW)  / 2.0;
+    CGFloat offsetY = (viewSize.height - scaledH) / 2.0;
+
+    CGAffineTransform docToDevice = CGAffineTransformMakeTranslation(offsetX, offsetY);
+    docToDevice = CGAffineTransformScale(docToDevice, scale, scale);
+
+    // Invert to get device→doc
+    CGAffineTransform deviceToDoc = CGAffineTransformInvert(docToDevice);
+
+    // C) Convert each removed stroke from device coords to doc coords
     std::vector<std::string> removedStrokesBase64;
     for (PKStroke *stroke in removedSet) {
+      // Make a PKDrawing with just this stroke
       PKDrawing *tempDrawing = [[PKDrawing alloc] initWithStrokes:@[ stroke ]];
-      NSData *strokeData = [tempDrawing dataRepresentation];
+
+      // Transform it from device to doc
+      PKDrawing *docDrawing = [tempDrawing drawingByApplyingTransform:deviceToDoc];
+
+      // Encode docDrawing → NSData → base64
+      NSData *strokeData = [docDrawing dataRepresentation];
       NSString *b64 = [strokeData base64EncodedStringWithOptions:0];
       removedStrokesBase64.push_back(std::string([b64 UTF8String]));
     }
 
+    // D) Convert each added stroke from device coords to doc coords
     std::vector<std::string> addedStrokesBase64;
     for (PKStroke *stroke in addedSet) {
       PKDrawing *tempDrawing = [[PKDrawing alloc] initWithStrokes:@[ stroke ]];
-      NSData *strokeData = [tempDrawing dataRepresentation];
+      PKDrawing *docDrawing = [tempDrawing drawingByApplyingTransform:deviceToDoc];
+
+      NSData *strokeData = [docDrawing dataRepresentation];
       NSString *b64 = [strokeData base64EncodedStringWithOptions:0];
       addedStrokesBase64.push_back(std::string([b64 UTF8String]));
     }
 
-    // 5) Create a local struct object and fill fields
+    // E) Emit event to JS with doc-coord strokes
     facebook::react::RNPencilKitEventEmitter::OnCanvasViewDrawingDidChange payload{};
     payload.addedStrokes = std::move(addedStrokesBase64);
     payload.removedStrokes = std::move(removedStrokesBase64);
 
-    // 6) Emit event to JS
     e->onCanvasViewDrawingDidChange(std::move(payload));
-      
-      _previousDrawing = canvasView.drawing;
 
-
-
+    // F) Update _previousDrawing
+    _previousDrawing = canvasView.drawing;
   }
 }
+
 
 
 - (void)canvasViewDidEndUsingTool:(PKCanvasView *)canvasView {
