@@ -42,6 +42,10 @@ function PencilKitComponent(
       redo: () => Commands.redo(nativeRef.current!),
       undo: () => Commands.undo(nativeRef.current!),
       loadStroke: (strokeBase64) => Commands.loadStroke(nativeRef.current!, strokeBase64),
+
+      applyStrokeDiff: (addedStrokes: string[], removedStrokes: string[]) =>
+        Commands.applyStrokeDiff(nativeRef.current!, addedStrokes, removedStrokes),
+
       saveDrawing: async (path) => {
         const handle = findNodeHandle(nativeRef.current) ?? -1;
         return NativeRNPencilKitUtil.saveDrawing(handle, path);
