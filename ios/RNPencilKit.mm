@@ -546,22 +546,22 @@ static const CGFloat kDocHeight = 1600.0;
 - (CGAffineTransform)documentToDeviceTransform {
   CGSize docSize = CGSizeMake(kDocWidth, kDocHeight);
   CGSize viewSize = _view.bounds.size;
-  
+
   // Calculate aspect-fit scale factors.
   CGFloat hRatio = viewSize.width / docSize.width;
   CGFloat vRatio = viewSize.height / docSize.height;
   CGFloat scale  = MIN(hRatio, vRatio);
-  
+
   // Center the document in the canvas.
   CGFloat scaledWidth  = docSize.width * scale;
   CGFloat scaledHeight = docSize.height * scale;
   CGFloat offsetX = (viewSize.width - scaledWidth) / 2.0;
   CGFloat offsetY = (viewSize.height - scaledHeight) / 2.0;
-  
+
   // Build the transform: first translate, then scale.
   CGAffineTransform t = CGAffineTransformMakeTranslation(offsetX, offsetY);
   t = CGAffineTransformScale(t, scale, scale);
-  
+
   RCTLogInfo(@"[RNPencilKit] documentToDeviceTransform: scale = %f, offsetX = %f, offsetY = %f", scale, offsetX, offsetY);
   return t;
 }
@@ -716,29 +716,29 @@ static const CGFloat kDocHeight = 1600.0;
 
 - (BOOL)stroke:(PKStroke *)stroke1 isEqualToStroke:(PKStroke *)stroke2 {
     RCTLogInfo(@"[RNPencilKit] Comparing strokes using custom function.");
-    
+
     PKInk *ink1 = stroke1.ink;
        PKInk *ink2 = stroke2.ink;
-    
+
     // Log ink details for debugging
     RCTLogInfo(@"[RNPencilKit] Ink1: type=%@, color=%@", ink1.inkType, ink1.color);
     RCTLogInfo(@"[RNPencilKit] Ink2: type=%@, color=%@", ink2.inkType, ink2.color);
-    
+
     // 2) Compare inkType first (pen vs pencil vs marker)
     if (![ink1.inkType isEqualToString:ink2.inkType]) {
         RCTLogInfo(@"[RNPencilKit] Ink types differ: %@ vs %@", ink1.inkType, ink2.inkType);
         return NO;
     }
-    
+
     // 3) Compare color components with tolerance
     CGFloat r1, g1, b1, a1;
     CGFloat r2, g2, b2, a2;
     [ink1.color getRed:&r1 green:&g1 blue:&b1 alpha:&a1];
     [ink2.color getRed:&r2 green:&g2 blue:&b2 alpha:&a2];
-    
+
     RCTLogInfo(@"[RNPencilKit] Ink1 RGBA=(%.3f, %.3f, %.3f, %.3f), Ink2 RGBA=(%.3f, %.3f, %.3f, %.3f)",
                r1, g1, b1, a1, r2, g2, b2, a2);
-    
+
     static CGFloat colorTolerance = 0.002; // Allow small floating-point differences
     if (fabs(r1 - r2) > colorTolerance ||
         fabs(g1 - g2) > colorTolerance ||
@@ -747,32 +747,32 @@ static const CGFloat kDocHeight = 1600.0;
         RCTLogInfo(@"[RNPencilKit] Ink colors differ beyond tolerance.");
         return NO;
     }
-    
-    
+
+
     RCTLogInfo(@"[RNPencilKit] Inks are equal.");
-    
+
     // Compare paths by count (you could extend this to compare each control point with tolerance).
     if (stroke1.path.count != stroke2.path.count) {
         RCTLogInfo(@"[RNPencilKit] Path counts differ: %lu vs %lu", (unsigned long)stroke1.path.count, (unsigned long)stroke2.path.count);
         return NO;
     }
     RCTLogInfo(@"[RNPencilKit] Path counts are equal (%lu points).", (unsigned long)stroke1.path.count);
-    
+
     // Compare randomSeed.
     if (stroke1.randomSeed != stroke2.randomSeed) {
         RCTLogInfo(@"[RNPencilKit] Random seeds differ: %u vs %u", stroke1.randomSeed, stroke2.randomSeed);
         return NO;
     }
     RCTLogInfo(@"[RNPencilKit] Random seeds are equal.");
-    
+
     // Compare mask (if any) – if both nil or equal, then it's fine.
-    if ((stroke1.mask && ![stroke1.mask isEqual:stroke2.mask]) ||
-        (!stroke1.mask && stroke2.mask)) {
-        RCTLogInfo(@"[RNPencilKit] Masks differ: %@ vs %@", stroke1.mask, stroke2.mask);
-        return NO;
-    }
+//    if ((stroke1.mask && ![stroke1.mask isEqual:stroke2.mask]) ||
+//        (!stroke1.mask && stroke2.mask)) {
+//        RCTLogInfo(@"[RNPencilKit] Masks differ: %@ vs %@", stroke1.mask, stroke2.mask);
+//        return NO;
+//    }
     RCTLogInfo(@"[RNPencilKit] Masks are equal.");
-    
+
     // Compare maskedPathRanges arrays.
     if (stroke1.maskedPathRanges.count != stroke2.maskedPathRanges.count) {
         RCTLogInfo(@"[RNPencilKit] Masked path ranges counts differ: %lu vs %lu", (unsigned long)stroke1.maskedPathRanges.count, (unsigned long)stroke2.maskedPathRanges.count);
@@ -787,10 +787,10 @@ static const CGFloat kDocHeight = 1600.0;
         }
     }
     RCTLogInfo(@"[RNPencilKit] Masked path ranges are equal.");
-    
+
     // Note: We intentionally ignore the transform because we apply it separately for multi-device support.
     RCTLogInfo(@"[RNPencilKit] Ignoring transform in comparison.");
-    
+
     // If all checks pass, we consider the strokes equal.
     RCTLogInfo(@"[RNPencilKit] Strokes are considered equal by custom matching.");
     return YES;
@@ -808,7 +808,7 @@ static const CGFloat kDocHeight = 1600.0;
     BOOL allRemovalsSuccessful = YES;
     for (NSString *removedStrokeBase64 in removedStrokesBase64) {
         RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Removing stroke base64: %@", removedStrokeBase64);
-        
+
         NSData *data = [[NSData alloc] initWithBase64EncodedString:removedStrokeBase64
                                                            options:NSDataBase64DecodingIgnoreUnknownCharacters];
         if (!data) {
@@ -816,7 +816,7 @@ static const CGFloat kDocHeight = 1600.0;
             allRemovalsSuccessful = NO;
             continue;
         }
-        
+
         NSError *error = nil;
         PKDrawing *incomingDrawing = [[PKDrawing alloc] initWithData:data error:&error];
         if (error || !incomingDrawing || incomingDrawing.strokes.count == 0) {
@@ -851,36 +851,36 @@ static const CGFloat kDocHeight = 1600.0;
     CGFloat hRatio = viewSize.width  / kDocWidth;   // e.g. 351 / 1131
     CGFloat vRatio = viewSize.height / kDocHeight;  // e.g. 497 / 1600
     CGFloat scale  = MIN(hRatio, vRatio);
-    
+
     CGFloat scaledW = kDocWidth  * scale;
     CGFloat scaledH = kDocHeight * scale;
     CGFloat offsetX = (viewSize.width  - scaledW) / 2.0;
     CGFloat offsetY = (viewSize.height - scaledH) / 2.0;
-    
+
     CGAffineTransform docToDevice = CGAffineTransformMakeTranslation(offsetX, offsetY);
     docToDevice = CGAffineTransformScale(docToDevice, scale, scale);
-    
+
     for (NSString *addedStrokeBase64 in addedStrokesBase64) {
         RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: Adding stroke base64: %@", addedStrokeBase64);
-        
+
         NSData *data = [[NSData alloc] initWithBase64EncodedString:addedStrokeBase64
                                                            options:NSDataBase64DecodingIgnoreUnknownCharacters];
         if (!data) {
             RCTLogError(@"[RNPencilKit] applyStrokeDiff: Failed to decode base64 for added stroke.");
             continue;
         }
-        
+
         NSError *error = nil;
         PKDrawing *docDrawing = [[PKDrawing alloc] initWithData:data error:&error];
         if (error || !docDrawing || docDrawing.strokes.count == 0) {
             RCTLogError(@"[RNPencilKit] applyStrokeDiff: Invalid added stroke data.");
             continue;
         }
-        
+
         RCTLogInfo(@"[RNPencilKit] applyStrokeDiff: The added drawing has %lu stroke(s)",
                    (unsigned long)docDrawing.strokes.count);
                 PKDrawing *deviceDrawing = [docDrawing drawingByApplyingTransform:docToDevice];
-        
+
         // 3) Append these new strokes to our in-memory stroke list
         [currentStrokes addObjectsFromArray:deviceDrawing.strokes];
     }
@@ -1048,7 +1048,7 @@ static const CGFloat kDocHeight = 1600.0;
         return;
       }
     }
-    
+
     if ([commandName isEqualToString:@"applyStrokeDiff"]) {
       if (args.count == 2 &&
           [args[0] isKindOfClass:[NSArray class]] &&
@@ -1059,7 +1059,7 @@ static const CGFloat kDocHeight = 1600.0;
         return;
       }
     }
-    
+
   RCTRNPencilKitHandleCommand(self, commandName, args);
 }
 
