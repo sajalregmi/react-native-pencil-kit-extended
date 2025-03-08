@@ -53,10 +53,16 @@ export interface PencilKitCommands {
     strokeBase64: string
   ) => void;
 
+  applyStrokeDiff: (
+    ref: React.ElementRef<ComponentType>,
+    addedStrokes: string[],
+    removedStrokes: string[]
+  ) => void;
+
 }
 
 export const Commands: PencilKitCommands = codegenNativeCommands<PencilKitCommands>({
-  supportedCommands: ['clear', 'showToolPicker', 'hideToolPicker', 'redo', 'undo', 'setTool', 'loadStroke'],
+  supportedCommands: ['clear', 'showToolPicker', 'hideToolPicker', 'redo', 'undo', 'setTool', 'loadStroke', 'applyStrokeDiff'],
 });
 
 // The "RNPencilKit" string must match your native component name
