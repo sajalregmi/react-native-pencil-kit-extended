@@ -39,6 +39,7 @@ export type PencilKitRef = {
   redo: () => void;
   undo: () => void;
   loadStroke: (strokeBase64: string) => void;
+  applyStrokeDiff: (addedStrokes: string[], removedStrokes: string[]) => void;
   setTool: (params: { toolType: PencilKitTool; width?: number; color?: ColorValue }) => void;
   saveDrawing: (path: string) => Promise<string>;
   loadDrawing: (path: string) => Promise<void>;
