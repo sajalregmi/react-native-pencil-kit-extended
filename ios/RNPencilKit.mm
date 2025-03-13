@@ -533,6 +533,12 @@ getEmitter(const SharedViewEventEmitter emitter) {
                                          width:(isWidthValid ? width : defaultWidth)];
     }
   }
+
+    if (tool == "lasso") {
+    _toolPicker.selectedTool = _view.tool = [[PKLassoTool alloc] init];
+  }
+
+
 }
 
 
