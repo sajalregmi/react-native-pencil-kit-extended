@@ -31,7 +31,8 @@ export type PencilKitTool =
   | 'crayon'
   | 'eraserVector'
   | 'eraserBitmap'
-  | 'eraserFixedWidthBitmap';
+  | 'eraserFixedWidthBitmap'
+  | 'lasso';
 export type PencilKitRef = {
   clear: () => void;
   showToolPicker: () => void;
